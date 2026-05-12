@@ -7,6 +7,7 @@
 # fixes before execution:
 #   - model_exists strips Ollama :tag suffixes before comparing aliases
 #   - health_json escapes JSON string fields
+#   - the active terminal banner is rendered as a stencil-wall topology
 #   - v2.2 runtime patch wrapper is no longer the public route
 
 set -Eeuo pipefail
@@ -61,6 +62,74 @@ if old_model_exists in text:
     text = text.replace(old_model_exists, new_model_exists, 1)
 elif "cut -d: -f1" not in text:
     raise SystemExit("Could not patch model_exists")
+
+stencil_banner = r'''banner() {
+  clear || true
+  cat <<'ART'
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                                      ┃
+┃  ███╗   ███╗ █████╗  ██████╗      ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗  ┃
+┃  ████╗ ████║██╔══██╗██╔════╝     ██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝  ┃
+┃  ██╔████╔██║███████║██║          ██║     ██║     ███████║██║   ██║██║  ██║█████╗    ┃
+┃  ██║╚██╔╝██║██╔══██║██║          ██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝    ┃
+┃  ██║ ╚═╝ ██║██║  ██║╚██████╗     ╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗  ┃
+┃  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝      ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝  ┃
+┃                                                                                      ┃
+┃       STENCIL WALL HOST STACK · Ubuntu muscle for a lightweight macOS VM             ┃
+┃       No API rent · no cloud priest · no token tax · just local silicon              ┃
+┃                                                                                      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+        .-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''-.
+       /  WALL #11434 + #4000                                                 \
+      /  "THE CLOUD WAS JUST SOMEONE ELSE'S COMPUTER WITH BETTER MARKETING"    \
+     /__________________________________________________________________________\
+     |                                                                          |
+     |   ┌─────────────────────────────┐      ┌─────────────────────────────┐   |
+     |   │ SYSTEM SCAN                 │      │ macOS PRECONFIG EXPORT      │   |
+     |   │ CPU / RAM / SWAP            │      │ host-connection.env         │   |
+     |   │ GPU / VRAM / CUDA           │      │ macos-host-preconfig.env    │   |
+     |   │ LAN IP / GATEWAY / IFACE    │      │ install-on-macos-vm.sh      │   |
+     |   │ SYSTEMD / UFW / PORTS       │      └──────────────┬──────────────┘   |
+     |   └──────────────┬──────────────┘                     │                  |
+     |                  │                                    │                  |
+     |                  ▼                                    │                  |
+     |   ┌─────────────────────────────┐                     │                  |
+     |   │ AUTO TUNER                  │                     │                  |
+     |   │ q5_k_m  ≥ 11 GB VRAM        │                     │                  |
+     |   │ q4_k_m  ≥  7 GB VRAM        │                     │                  |
+     |   │ iq4_xs  ≥  5 GB VRAM        │                     │                  |
+     |   │ q3_k_m  fallback            │                     │                  |
+     |   └──────────────┬──────────────┘                     │                  |
+     |                  │                                    │                  |
+     |                  ▼                                    │                  |
+     |   ┌─────────────────────────────┐                     │                  |
+     |   │ LiteLLM Proxy               │◄────────────────────┘                  |
+     |   │ OpenAI-compatible API       │                                        |
+     |   │ LAN endpoint :4000          │      ("></")  rat@wall:~$ curl /models |
+     |   │ master key protected        │       / > spray                         |
+     |   └──────────────┬──────────────┘                                        |
+     |                  │                                                       |
+     |                  ▼                                                       |
+     |   ┌─────────────────────────────┐      ┌─────────────────────────────┐   |
+     |   │ Ollama Runtime              │      │ PROCESS / SAFETY LAYER      │   |
+     |   │ qwen-coder-ablit            │      │ PID files                   │   |
+     |   │ Qwen2.5 Coder 7B            │      │ INT / TERM cleanup          │   |
+     |   │ abliterated GGUF            │      │ systemd-user or nohup       │   |
+     |   │ LAN endpoint :11434         │      │ UFW optional rules          │   |
+     |   └──────────────┬──────────────┘      └─────────────────────────────┘   |
+     |                  │                                                       |
+     |                  ▼                                                       |
+     |   ┌─────────────────────────────┐                                        |
+     |   │ NVIDIA / CUDA ACCELERATION  │   local inference, no rented oracle    |
+     |   └─────────────────────────────┘                                        |
+     |__________________________________________________________________________|
+ART
+}
+'''
+text, banner_count = re.subn(r"banner\(\) \{.*?\n\}\n\nusage\(\) \{", stencil_banner + "\nusage() {", text, count=1, flags=re.S)
+if banner_count != 1:
+    raise SystemExit("Could not patch banner")
 
 new_health_json = r'''health_json() {
   local status="$1" elapsed="$(( $(date +%s) - START_TS ))"

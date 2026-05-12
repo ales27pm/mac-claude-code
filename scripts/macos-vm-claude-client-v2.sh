@@ -3,7 +3,7 @@
 #
 # Hardened macOS VM client installer for Claude Code using a preconfigured
 # Ubuntu-hosted Ollama/LiteLLM proxy.
-# Version: 2.0
+# Version: 2.1
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -96,7 +96,7 @@ banner() {
 ║       ██║ ╚═╝ ██║██║  ██║╚██████╗      ╚████╔╝ ██║ ╚═╝ ██║                  ║
 ║       ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝       ╚═══╝  ╚═╝     ╚═╝                  ║
 ║                                                                              ║
-║       Claude Code VM Client: import host config → verify → write .env         ║
+║        Claude Code VM Client: import host config → verify → write .env        ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ART
@@ -105,7 +105,7 @@ ART
 usage() {
   cat <<USAGE
 Usage:
-  ./scripts/macos-vm-claude-client.sh [command]
+  $0 [command]
 
 Commands:
   install       Import host config, install tools, write .env, create wrappers. Default.
@@ -142,7 +142,7 @@ ascii_topology() {
 ${BLUE}${BOLD}Client topology${RESET}
 
   ┌──────────────────────────────────────────────────────────────┐
-  │ macOS VM                                                      │
+  │ macOS VM                                                     │
   │ VS Code + Node + Claude Code CLI                              │
   └──────────────┬───────────────────────────────────────────────┘
                  │ ANTHROPIC_BASE_URL=$DETECTED_LITELLM_BASE
@@ -219,7 +219,9 @@ load_host_config() {
 profiles_to_update() {
   local profiles=("$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile")
   local any="0" profile
-  for profile in "${profiles[@]}"; do [[ -f "$profile" ]] && { echo "$profile"; any="1"; }; done
+  for profile in "${profiles[@]}"; do
+    [[ -f "$profile" ]] && { echo "$profile"; any="1"; }
+  done
   [[ "$any" == "0" ]] && { touch "$HOME/.zshrc"; echo "$HOME/.zshrc"; }
 }
 
@@ -245,14 +247,21 @@ install_homebrew_if_needed() {
   [[ "$INSTALL_BREW_IF_MISSING" != "1" ]] && { log WARN "Homebrew missing; INSTALL_BREW_IF_MISSING=0"; return; }
   log INFO "Installing Homebrew non-interactively"
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; elif [[ -x /usr/local/bin/brew ]]; then eval "$(/usr/local/bin/brew shellenv)"; fi
+  if [[ -x /opt/homebrew/bin/brew ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [[ -x /usr/local/bin/brew ]]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
   [[ "$WRITE_SHELL_PROFILE" == "1" ]] && ensure_profile_line "brew shellenv" 'if [[ -x /opt/homebrew/bin/brew ]]; then eval "$(/opt/homebrew/bin/brew shellenv)"; elif [[ -x /usr/local/bin/brew ]]; then eval "$(/usr/local/bin/brew shellenv)"; fi'
   log OK "Homebrew installed"
 }
 
 install_node() {
   step "Node.js"
-  if command_exists node && command_exists npm; then log OK "Node $(node --version), npm $(npm --version)"; return; fi
+  if command_exists node && command_exists npm; then
+    log OK "Node $(node --version), npm $(npm --version)"
+    return
+  fi
   command_exists brew || { log ERR "Node.js missing and Homebrew unavailable. Install Node.js or allow Homebrew install."; exit 1; }
   run brew install node
 }
@@ -278,7 +287,11 @@ install_claude_code() {
 
 default_gateway() { route -n get default 2>/dev/null | awk '/gateway:/{print $2; exit}' || true; }
 unique_candidates() { { [[ -n "$DETECTED_HOST_IP" ]] && echo "$DETECTED_HOST_IP"; [[ -n "$HOST_IP" ]] && echo "$HOST_IP"; default_gateway; echo "10.0.2.2"; echo "192.168.64.1"; echo "172.16.0.1"; echo "192.168.1.1"; } | awk 'NF && !seen[$0]++'; }
-probe_url() { local url="$1"; curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY" "$url" >/dev/null 2>&1; }
+
+probe_url() {
+  local url="$1"
+  curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY" "$url" >/dev/null 2>&1
+}
 
 probe_host() {
   step "Host verification"
@@ -290,17 +303,28 @@ probe_host() {
   fi
   if [[ -n "$DETECTED_LITELLM_BASE" ]]; then
     log INFO "Testing preconfigured LiteLLM: $DETECTED_LITELLM_BASE"
-    if probe_url "$DETECTED_LITELLM_BASE/v1/models"; then log OK "Preconfigured LiteLLM is reachable"; return 0; fi
+    if probe_url "$DETECTED_LITELLM_BASE/v1/models"; then
+      log OK "Preconfigured LiteLLM is reachable"
+      return 0
+    fi
     log WARN "Preconfigured LiteLLM did not respond; falling back to candidate probing"
   fi
+
   local candidate proxy_url ollama_url
   for candidate in $(unique_candidates); do
-    proxy_url="http://$candidate:$LITELLM_PORT/v1/models"; ollama_url="http://$candidate:$OLLAMA_PORT/api/tags"
+    proxy_url="http://$candidate:$LITELLM_PORT/v1/models"
+    ollama_url="http://$candidate:$OLLAMA_PORT/api/tags"
     log INFO "Probing $proxy_url"
     if probe_url "$proxy_url"; then
-      DETECTED_HOST_IP="$candidate"; DETECTED_LITELLM_BASE="http://$candidate:$LITELLM_PORT"; DETECTED_OLLAMA_BASE="http://$candidate:$OLLAMA_PORT"
+      DETECTED_HOST_IP="$candidate"
+      DETECTED_LITELLM_BASE="http://$candidate:$LITELLM_PORT"
+      DETECTED_OLLAMA_BASE="http://$candidate:$OLLAMA_PORT"
       log OK "LiteLLM detected: $DETECTED_LITELLM_BASE"
-      curl -fsS --connect-timeout 2 "$ollama_url" >/dev/null 2>&1 && log OK "Ollama detected: $DETECTED_OLLAMA_BASE" || log WARN "Ollama direct endpoint unreachable; LiteLLM is enough for Claude Code"
+      if curl -fsS --connect-timeout 2 "$ollama_url" >/dev/null 2>&1; then
+        log OK "Ollama detected: $DETECTED_OLLAMA_BASE"
+      else
+        log WARN "Ollama direct endpoint unreachable; LiteLLM is enough for Claude Code"
+      fi
       return 0
     fi
   done
@@ -314,11 +338,28 @@ write_project_env() {
   local env_dir gitignore_path
   env_dir="$(dirname "$PROJECT_ENV_PATH")"
   mkdir -p "$env_dir"
-  if [[ -f "$PROJECT_ENV_PATH" && "$FORCE_ENV_REWRITE" == "1" ]]; then cp "$PROJECT_ENV_PATH" "$PROJECT_ENV_PATH.bak.$(date +%Y%m%d-%H%M%S)"; log WARN "Existing env backed up before rewrite"; elif [[ -f "$PROJECT_ENV_PATH" && "$FORCE_ENV_REWRITE" != "1" ]]; then log WARN "Env exists and FORCE_ENV_REWRITE=0; leaving untouched"; return; fi
-  { write_env_var ANTHROPIC_API_KEY "$LITELLM_KEY"; write_env_var ANTHROPIC_BASE_URL "$DETECTED_LITELLM_BASE"; write_env_var ANTHROPIC_MODEL "$MODEL_ALIAS"; } > "$PROJECT_ENV_PATH"
+  if [[ -f "$PROJECT_ENV_PATH" && "$FORCE_ENV_REWRITE" == "1" ]]; then
+    cp "$PROJECT_ENV_PATH" "$PROJECT_ENV_PATH.bak.$(date +%Y%m%d-%H%M%S)"
+    log WARN "Existing env backed up before rewrite"
+  elif [[ -f "$PROJECT_ENV_PATH" && "$FORCE_ENV_REWRITE" != "1" ]]; then
+    log WARN "Env exists and FORCE_ENV_REWRITE=0; leaving untouched"
+    return
+  fi
+
+  {
+    write_env_var ANTHROPIC_API_KEY "$LITELLM_KEY"
+    write_env_var ANTHROPIC_BASE_URL "$DETECTED_LITELLM_BASE"
+    write_env_var ANTHROPIC_MODEL "$MODEL_ALIAS"
+  } > "$PROJECT_ENV_PATH"
   chmod 600 "$PROJECT_ENV_PATH"
+
   gitignore_path="$env_dir/.gitignore"
-  if [[ -f "$gitignore_path" ]]; then grep -qxF ".env" "$gitignore_path" || echo ".env" >> "$gitignore_path"; grep -qxF ".env.*" "$gitignore_path" || echo ".env.*" >> "$gitignore_path"; else { echo ".env"; echo ".env.*"; echo "!.env.example"; } > "$gitignore_path"; fi
+  if [[ -f "$gitignore_path" ]]; then
+    grep -qxF ".env" "$gitignore_path" || echo ".env" >> "$gitignore_path"
+    grep -qxF ".env.*" "$gitignore_path" || echo ".env.*" >> "$gitignore_path"
+  else
+    { echo ".env"; echo ".env.*"; echo "!.env.example"; } > "$gitignore_path"
+  fi
   log OK "Wrote $PROJECT_ENV_PATH"
 }
 
@@ -346,14 +387,34 @@ MODEL_ALIAS="$MODEL_ALIAS"
 LITELLM_KEY="$LITELLM_KEY"
 LITELLM_BASE="$DETECTED_LITELLM_BASE"
 OLLAMA_BASE="$DETECTED_OLLAMA_BASE"
-GREEN="\\033[32m"; RED="\\033[31m"; YELLOW="\\033[33m"; CYAN="\\033[36m"; BOLD="\\033[1m"; RESET="\\033[0m"
-echo; echo "\033[36m\033[1mQwen Claude Stack Status\033[0m"
-echo "  model:    \$MODEL_ALIAS"; echo "  litellm:  \$LITELLM_BASE"; echo "  ollama:   \$OLLAMA_BASE"; echo
-curl -fsS -H "Authorization: Bearer \$LITELLM_KEY" "\$LITELLM_BASE/v1/models" >/dev/null 2>&1 && echo "  LiteLLM: \${GREEN}OK\${RESET}" || echo "  LiteLLM: \${RED}FAIL\${RESET}"
-curl -fsS "\$OLLAMA_BASE/api/tags" >/dev/null 2>&1 && echo "  Ollama:  \${GREEN}OK\${RESET}" || echo "  Ollama:  \${YELLOW}UNREACHABLE DIRECTLY\${RESET}"
+GREEN="\\033[32m"
+RED="\\033[31m"
+YELLOW="\\033[33m"
+CYAN="\\033[36m"
+BOLD="\\033[1m"
+RESET="\\033[0m"
+
+echo -e "\n\${CYAN}\${BOLD}Qwen Claude Stack Status\${RESET}"
+echo "  model:    \$MODEL_ALIAS"
+echo "  litellm:  \$LITELLM_BASE"
+echo "  ollama:   \$OLLAMA_BASE"
+echo
+
+if curl -fsS --connect-timeout 2 -H "Authorization: Bearer \$LITELLM_KEY" "\$LITELLM_BASE/v1/models" >/dev/null 2>&1; then
+  echo -e "  LiteLLM: \${GREEN}OK\${RESET}"
+else
+  echo -e "  LiteLLM: \${RED}FAIL\${RESET}"
+fi
+
+if curl -fsS --connect-timeout 2 "\$OLLAMA_BASE/api/tags" >/dev/null 2>&1; then
+  echo -e "  Ollama:  \${GREEN}OK\${RESET}"
+else
+  echo -e "  Ollama:  \${YELLOW}UNREACHABLE DIRECTLY\${RESET}"
+fi
 echo
 STATUSEOF
   chmod +x "$BIN_DIR/qwen-stack-status"
+
   [[ "$WRITE_SHELL_PROFILE" == "1" ]] && ensure_profile_line "alias clocal=" "alias clocal='claude-local'; alias qstatus='qwen-stack-status'"
   log OK "Created claude-local and qwen-stack-status"
 }
@@ -380,26 +441,124 @@ JSONEOF
 try_ollama_launch() {
   [[ "$TRY_OLLAMA_LAUNCH" == "1" ]] || return 0
   step "Ollama launcher"
-  if command_exists ollama && ollama launch --help >/dev/null 2>&1; then export OLLAMA_HOST="$DETECTED_OLLAMA_BASE"; ollama launch claude --model "$MODEL_ALIAS" || true; else log WARN "ollama launch unavailable; using Claude Code env route"; fi
+  if command_exists ollama && ollama launch --help >/dev/null 2>&1; then
+    export OLLAMA_HOST="$DETECTED_OLLAMA_BASE"
+    ollama launch claude --model "$MODEL_ALIAS" || true
+  else
+    log WARN "ollama launch unavailable; using Claude Code env route"
+  fi
 }
 
-print_env() { load_host_config || true; probe_host || true; write_env_var ANTHROPIC_API_KEY "$LITELLM_KEY"; write_env_var ANTHROPIC_BASE_URL "$DETECTED_LITELLM_BASE"; write_env_var ANTHROPIC_MODEL "$MODEL_ALIAS"; }
+print_env() {
+  load_host_config || true
+  probe_host || true
+  write_env_var ANTHROPIC_API_KEY "$LITELLM_KEY"
+  write_env_var ANTHROPIC_BASE_URL "$DETECTED_LITELLM_BASE"
+  write_env_var ANTHROPIC_MODEL "$MODEL_ALIAS"
+}
 
 print_status() {
-  banner; load_host_config || true; ascii_topology
+  banner
+  load_host_config || true
+  ascii_topology
+
   echo "${BOLD}Local tools${RESET}"
-  command_exists node && kv "node" "$(node --version)" || kv "node" "missing"; command_exists npm && kv "npm" "$(npm --version)" || kv "npm" "missing"; command_exists claude && kv "claude" "$(claude --version || true)" || kv "claude" "missing"
-  kv "env" "$PROJECT_ENV_PATH"; kv "host config" "$PERSISTED_HOST_CONFIG"; kv "log" "$LOG_FILE"; echo
+  command_exists node && kv "node" "$(node --version)" || kv "node" "missing"
+  command_exists npm && kv "npm" "$(npm --version)" || kv "npm" "missing"
+  command_exists claude && kv "claude" "$(claude --version || true)" || kv "claude" "missing"
+
+  kv "env" "$PROJECT_ENV_PATH"
+  kv "host config" "$PERSISTED_HOST_CONFIG"
+  kv "log" "$LOG_FILE"
+  echo
+
   [[ -f "$STATUS_JSON" ]] && { echo "${BOLD}Last status${RESET}"; cat "$STATUS_JSON"; echo; }
-  if [[ -n "$DETECTED_LITELLM_BASE" && "$SKIP_PROBE" != "1" ]]; then curl -fsS -H "Authorization: Bearer $LITELLM_KEY" "$DETECTED_LITELLM_BASE/v1/models" >/dev/null 2>&1 && log OK "LiteLLM healthy" || log WARN "LiteLLM unreachable"; fi
+
+  if [[ -n "$DETECTED_LITELLM_BASE" && "$SKIP_PROBE" != "1" ]]; then
+    if curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY" "$DETECTED_LITELLM_BASE/v1/models" >/dev/null 2>&1; then
+      log OK "LiteLLM healthy"
+    else
+      log WARN "LiteLLM unreachable"
+    fi
+  fi
 }
 
-doctor() { banner; load_host_config || true; echo "${BOLD}Network candidates${RESET}"; unique_candidates | sed 's/^/  - /'; echo; echo "${BOLD}Route${RESET}"; route -n get default 2>/dev/null || true; echo; echo "${BOLD}DNS / network${RESET}"; ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1 && log OK "Internet reachable" || log WARN "Internet ping failed"; echo; probe_host || true; print_status; }
-launch_claude() { [[ -f "$PROJECT_ENV_PATH" ]] && cd "$(dirname "$PROJECT_ENV_PATH")"; exec claude-local; }
-uninstall_client() { step "Uninstall client generated files"; rm -f "$BIN_DIR/claude-local" "$BIN_DIR/qwen-stack-status" "$STATUS_JSON"; log OK "Removed wrappers and status file. Project .env and persisted host config kept."; }
-summary() { write_status_json; echo; echo "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════════════════╗${RESET}"; echo "${GREEN}${BOLD}║                              MAC CLIENT READY                               ║${RESET}"; echo "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════════════════╝${RESET}"; echo; kv "Host IP" "$DETECTED_HOST_IP"; kv "LiteLLM" "$DETECTED_LITELLM_BASE"; kv "Ollama" "$DETECTED_OLLAMA_BASE"; kv "Model" "$MODEL_ALIAS"; kv "Env file" "$PROJECT_ENV_PATH"; kv "Host config" "$PERSISTED_HOST_CONFIG"; kv "Status JSON" "$STATUS_JSON"; kv "Log file" "$LOG_FILE"; echo; echo "${CYAN}${BOLD}Run:${RESET}"; echo "  qwen-stack-status"; echo "  claude-local"; echo; }
-import_host_only() { banner; load_host_config; probe_host; write_status_json; log OK "Host config imported and verified"; }
-install_client() { banner; load_host_config; probe_host; ascii_topology; ensure_path; install_homebrew_if_needed; install_node; configure_npm_global; install_claude_code; write_project_env; create_wrappers; try_ollama_launch; summary; }
+doctor() {
+  banner
+  load_host_config || true
+  echo "${BOLD}Network candidates${RESET}"
+  unique_candidates | sed 's/^/  - /'
+  echo
+  echo "${BOLD}Route${RESET}"
+  route -n get default 2>/dev/null || true
+  echo
+  echo "${BOLD}DNS / network${RESET}"
+  if ping -c 1 -W 2 1.1.1.1 >/dev/null 2>&1; then
+    log OK "Internet reachable"
+  else
+    log WARN "Internet ping failed"
+  fi
+  echo
+  probe_host || true
+  print_status
+}
+
+launch_claude() {
+  [[ -f "$PROJECT_ENV_PATH" ]] && cd "$(dirname "$PROJECT_ENV_PATH")"
+  exec claude-local
+}
+
+uninstall_client() {
+  step "Uninstall client generated files"
+  rm -f "$BIN_DIR/claude-local" "$BIN_DIR/qwen-stack-status" "$STATUS_JSON"
+  log OK "Removed wrappers and status file. Project .env and persisted host config kept."
+}
+
+summary() {
+  write_status_json
+  echo
+  echo "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════════════════╗${RESET}"
+  echo "${GREEN}${BOLD}║                              MAC CLIENT READY                               ║${RESET}"
+  echo "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════════════════╝${RESET}"
+  echo
+  kv "Host IP" "$DETECTED_HOST_IP"
+  kv "LiteLLM" "$DETECTED_LITELLM_BASE"
+  kv "Ollama" "$DETECTED_OLLAMA_BASE"
+  kv "Model" "$MODEL_ALIAS"
+  kv "Env file" "$PROJECT_ENV_PATH"
+  kv "Host config" "$PERSISTED_HOST_CONFIG"
+  kv "Status JSON" "$STATUS_JSON"
+  kv "Log file" "$LOG_FILE"
+  echo
+  echo "${CYAN}${BOLD}Run:${RESET}"
+  echo "  qwen-stack-status"
+  echo "  claude-local"
+  echo
+}
+
+import_host_only() {
+  banner
+  load_host_config
+  probe_host
+  write_status_json
+  log OK "Host config imported and verified"
+}
+
+install_client() {
+  banner
+  load_host_config
+  probe_host
+  ascii_topology
+  ensure_path
+  install_homebrew_if_needed
+  install_node
+  configure_npm_global
+  install_claude_code
+  write_project_env
+  create_wrappers
+  try_ollama_launch
+  summary
+}
 
 case "${1:-install}" in
   install) install_client ;;

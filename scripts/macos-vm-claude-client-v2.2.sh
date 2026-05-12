@@ -9,6 +9,7 @@
 #   - status JSON escapes backslashes and double-quotes
 #   - optional Ollama launcher uses `ollama run`
 #   - generated wrappers fail hard on broken .env sourcing
+#   - active terminal banner is rendered as a stencil-wall client topology
 
 set -Eeuo pipefail
 
@@ -30,17 +31,72 @@ python3 - "$SOURCE_SCRIPT" "$PATCHED_SCRIPT" <<'PY'
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 source_path = pathlib.Path(sys.argv[1])
 patched_path = pathlib.Path(sys.argv[2])
 text = source_path.read_text(encoding="utf-8")
 text = text.replace("# Version: 2.1", "# Version: 2.2", 1)
-text = text.replace(
-    "║        Claude Code VM Client: import host config → verify → write .env        ║",
-    "║        Claude Code VM Client: import host config → verify → write .env       ║\n║                                  v2.2                                        ║",
-    1,
-)
+
+stencil_banner = r'''banner() {
+  clear || true
+  cat <<'ART'
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                                      ┃
+┃       ███╗   ███╗ █████╗  ██████╗     ██╗   ██╗███╗   ███╗                         ┃
+┃       ████╗ ████║██╔══██╗██╔════╝     ██║   ██║████╗ ████║                         ┃
+┃       ██╔████╔██║███████║██║          ██║   ██║██╔████╔██║                         ┃
+┃       ██║╚██╔╝██║██╔══██║██║          ╚██╗ ██╔╝██║╚██╔╝██║                         ┃
+┃       ██║ ╚═╝ ██║██║  ██║╚██████╗      ╚████╔╝ ██║ ╚═╝ ██║                         ┃
+┃       ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝       ╚═══╝  ╚═╝     ╚═╝                         ┃
+┃                                                                                      ┃
+┃       STENCIL WALL CLIENT · Claude Code inside the VM, muscle outside the VM          ┃
+┃       thin client · dirty wall · clean endpoint · local model                         ┃
+┃                                                                                      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+        .-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''-.
+       /  WALL #VM                                                            \
+      /  "THE LOGIN SCREEN WANTED A CLOUD. THE RAT FOUND A BASE_URL."           \
+     /__________________________________________________________________________\
+     |                                                                          |
+     |   ┌─────────────────────────────┐                                        |
+     |   │ macOS VM                    │      ("></")  rat@vm:~$ claude-local    |
+     |   │ VS Code                     │       / > spray                        |
+     |   │ Claude Code CLI             │                                        |
+     |   │ project .env                │                                        |
+     |   │ claude-local wrapper        │                                        |
+     |   └──────────────┬──────────────┘                                        |
+     |                  │                                                       |
+     |                  │  ANTHROPIC_API_KEY                                    |
+     |                  │  ANTHROPIC_BASE_URL                                   |
+     |                  │  ANTHROPIC_MODEL                                      |
+     |                  ▼                                                       |
+     |   ┌─────────────────────────────┐      ┌─────────────────────────────┐   |
+     |   │ Host Preconfig Import       │      │ Client Toolchain            │   |
+     |   │ host-connection.env         │      │ Homebrew / Node / npm       │   |
+     |   │ macos-host-preconfig.env    │      │ Claude Code CLI             │   |
+     |   │ persisted config            │      │ qwen-stack-status           │   |
+     |   └──────────────┬──────────────┘      └─────────────────────────────┘   |
+     |                  │                                                       |
+     |                  ▼                                                       |
+     |   ┌─────────────────────────────┐                                        |
+     |   │ Ubuntu Host LiteLLM         │   :4000 OpenAI-compatible API          |
+     |   └──────────────┬──────────────┘                                        |
+     |                  │                                                       |
+     |                  ▼                                                       |
+     |   ┌─────────────────────────────┐                                        |
+     |   │ Ubuntu Host Ollama          │   :11434 qwen-coder-ablit              |
+     |   └─────────────────────────────┘                                        |
+     |__________________________________________________________________________|
+ART
+}
+'''
+text, count = re.subn(r"banner\(\) \{.*?\n\}\n\nusage\(\) \{", stencil_banner + "\nusage() {", text, count=1, flags=re.S)
+if count != 1:
+    raise SystemExit("Could not patch banner")
+
 patched_path.write_text(text, encoding="utf-8")
 PY
 

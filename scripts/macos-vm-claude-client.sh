@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# macOS VM client installer for Claude Code using a local Ubuntu-hosted
+# macOS VM client installer for Claude Code using a preconfigured Ubuntu-hosted
 # Ollama/LiteLLM proxy.
 #
-# The Ubuntu host does the heavy model work. The macOS VM only runs VS Code,
-# Node.js, Claude Code CLI, and a small wrapper that loads project .env values.
+# The Ubuntu host script generates host-connection.env / macos-host-preconfig.env.
+# This script can import that file, persist it locally, and configure Claude Code.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -15,19 +15,26 @@ MODEL_ALIAS="${MODEL_ALIAS:-qwen-coder-ablit}"
 LITELLM_KEY="${LITELLM_KEY:-local-dev-key}"
 LITELLM_PORT="${LITELLM_PORT:-4000}"
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+HOST_IP="${HOST_IP:-}"
+LITELLM_BASE_URL="${LITELLM_BASE_URL:-}"
+OLLAMA_HOST_URL="${OLLAMA_HOST_URL:-}"
+HOST_CONFIG_PATH="${HOST_CONFIG_PATH:-}"
 INSTALL_BREW_IF_MISSING="${INSTALL_BREW_IF_MISSING:-1}"
 INSTALL_CLAUDE_CODE="${INSTALL_CLAUDE_CODE:-1}"
 TRY_OLLAMA_LAUNCH="${TRY_OLLAMA_LAUNCH:-0}"
 WRITE_SHELL_PROFILE="${WRITE_SHELL_PROFILE:-1}"
 PROJECT_ENV_PATH="${PROJECT_ENV_PATH:-$(pwd)/.env}"
+FORCE_ENV_REWRITE="${FORCE_ENV_REWRITE:-1}"
 
 STATE_DIR="$HOME/Library/Logs/$APP_NAME"
 DATA_DIR="$HOME/Library/Application Support/$APP_NAME"
+CONFIG_DIR="$HOME/.config/$APP_NAME"
 BIN_DIR="$HOME/.local/bin"
+PERSISTED_HOST_CONFIG="$CONFIG_DIR/host-connection.env"
 LOG_FILE="$STATE_DIR/client-$(date +%Y%m%d-%H%M%S).log"
 STATUS_JSON="$DATA_DIR/status.json"
 
-mkdir -p "$STATE_DIR" "$DATA_DIR" "$BIN_DIR"
+mkdir -p "$STATE_DIR" "$DATA_DIR" "$CONFIG_DIR" "$BIN_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 if command -v tput >/dev/null 2>&1 && [[ -t 1 ]]; then
@@ -50,10 +57,10 @@ on_error() {
   echo "${RED}${BOLD}✘ FAILURE${RESET} step=${CURRENT_STEP} line=${BASH_LINENO[0]} exit=$exit_code"
   echo "${DIM}Log: $LOG_FILE${RESET}"
   echo
-  echo "Quick recovery:"
+  echo "Recovery:"
+  echo "  HOST_CONFIG_PATH=./macos-host-preconfig.env $0 install"
   echo "  HOST_IP=<ubuntu-host-ip> $0 install"
-  echo "  $0 status"
-  echo "  tail -n 160 '$LOG_FILE'"
+  echo "  $0 doctor"
   exit "$exit_code"
 }
 trap on_error ERR
@@ -83,9 +90,13 @@ run() {
   "$@"
 }
 
+kv() {
+  printf "%-22s %s\n" "$1:" "$2"
+}
+
 banner() {
   clear || true
-  cat <<'EOF'
+  cat <<'ART'
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                              ║
 ║       ███╗   ███╗ █████╗  ██████╗     ██╗   ██╗███╗   ███╗                  ║
@@ -95,58 +106,131 @@ banner() {
 ║       ██║ ╚═╝ ██║██║  ██║╚██████╗      ╚████╔╝ ██║ ╚═╝ ██║                  ║
 ║       ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝       ╚═══╝  ╚═╝     ╚═╝                  ║
 ║                                                                              ║
-║             Claude Code Client Installer → Ubuntu Host LLM Proxy             ║
+║       Claude Code VM Client: import host config → verify → write .env         ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-EOF
+ART
 }
 
 usage() {
-  cat <<EOF
+  cat <<USAGE
 Usage:
   ./scripts/macos-vm-claude-client.sh [command]
 
 Commands:
-  install       Install/configure Node, Claude Code CLI, .env, wrappers. Default.
-  status        Check host/proxy/client state.
+  install       Import host config, install tools, write .env, create wrappers. Default.
+  import-host   Import host preconfig only.
+  status        Check local tools and the preconfigured host endpoint.
   env           Print Claude Code environment values.
-  launch        Launch Claude Code through the local wrapper.
+  launch        Launch Claude Code through claude-local.
   doctor        Extended diagnostics.
-  uninstall     Remove generated wrapper scripts and local status file.
+  uninstall     Remove generated wrappers and local status file. Project .env kept.
   help          Show this help.
+
+Host preconfiguration sources, in priority order:
+  1. HOST_CONFIG_PATH=/path/to/macos-host-preconfig.env
+  2. ./macos-host-preconfig.env
+  3. ./host-connection.env
+  4. ~/.config/mac-claude-code/host-connection.env
+  5. ~/Library/Application Support/mac-claude-code/host-connection.env
+  6. HOST_IP / LITELLM_BASE_URL env vars
+  7. network probing fallback
 
 Useful overrides:
   HOST_IP=192.168.1.50
-  MODEL_ALIAS=qwen-coder-ablit
-  LITELLM_KEY=local-dev-key
+  HOST_CONFIG_PATH=./macos-host-preconfig.env
   PROJECT_ENV_PATH=/path/to/project/.env
   INSTALL_BREW_IF_MISSING=0
   INSTALL_CLAUDE_CODE=0
-EOF
+USAGE
 }
 
 ascii_topology() {
-  cat <<EOF
+  cat <<TOPOLOGY
 
-${BLUE}${BOLD}Topology${RESET}
+${BLUE}${BOLD}Client topology${RESET}
 
   ┌──────────────────────────────────────────────────────────────┐
   │ macOS VM                                                      │
   │ VS Code + Node + Claude Code CLI                              │
   └──────────────┬───────────────────────────────────────────────┘
-                 │ ANTHROPIC_BASE_URL
+                 │ ANTHROPIC_BASE_URL=$DETECTED_LITELLM_BASE
                  ▼
         ┌───────────────────────┐
-        │ Ubuntu Host LiteLLM   │  http://HOST_IP:$LITELLM_PORT
+        │ Ubuntu Host LiteLLM   │  $DETECTED_LITELLM_BASE
         └───────────┬───────────┘
                     │
                     ▼
         ┌───────────────────────┐
-        │ Ubuntu Host Ollama    │  http://HOST_IP:$OLLAMA_PORT
+        │ Ubuntu Host Ollama    │  $DETECTED_OLLAMA_BASE
         │ $MODEL_ALIAS
         └───────────────────────┘
 
-EOF
+TOPOLOGY
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+find_host_config() {
+  local candidates=()
+  [[ -n "$HOST_CONFIG_PATH" ]] && candidates+=("$HOST_CONFIG_PATH")
+  candidates+=("$(pwd)/macos-host-preconfig.env")
+  candidates+=("$(pwd)/host-connection.env")
+  candidates+=("$PERSISTED_HOST_CONFIG")
+  candidates+=("$DATA_DIR/host-connection.env")
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+load_host_config() {
+  step "Host preconfiguration"
+  local config_path=""
+  if config_path="$(find_host_config)"; then
+    log INFO "Loading host config: $config_path"
+    set -a
+    # shellcheck disable=SC1090
+    source "$config_path"
+    set +a
+
+    mkdir -p "$CONFIG_DIR" "$DATA_DIR"
+    cp "$config_path" "$PERSISTED_HOST_CONFIG"
+    cp "$config_path" "$DATA_DIR/host-connection.env"
+    chmod 600 "$PERSISTED_HOST_CONFIG" "$DATA_DIR/host-connection.env"
+    log OK "Persisted host config: $PERSISTED_HOST_CONFIG"
+  else
+    log WARN "No host preconfig file found; using environment/probe fallback"
+  fi
+
+  MODEL_ALIAS="${MODEL_ALIAS:-qwen-coder-ablit}"
+  LITELLM_KEY="${LITELLM_KEY:-local-dev-key}"
+  LITELLM_PORT="${LITELLM_PORT:-4000}"
+  OLLAMA_PORT="${OLLAMA_PORT:-11434}"
+
+  if [[ -n "${ANTHROPIC_BASE_URL:-}" && -z "$LITELLM_BASE_URL" ]]; then
+    LITELLM_BASE_URL="$ANTHROPIC_BASE_URL"
+  fi
+
+  if [[ -n "$LITELLM_BASE_URL" && -z "$HOST_IP" ]]; then
+    HOST_IP="$(printf '%s' "$LITELLM_BASE_URL" | sed -E 's#^https?://([^:/]+).*#\1#')"
+  fi
+
+  if [[ -n "$HOST_IP" ]]; then
+    DETECTED_HOST_IP="$HOST_IP"
+    DETECTED_LITELLM_BASE="${LITELLM_BASE_URL:-http://$HOST_IP:$LITELLM_PORT}"
+    DETECTED_OLLAMA_BASE="${OLLAMA_HOST_URL:-http://$HOST_IP:$OLLAMA_PORT}"
+    log OK "Preconfigured host: $DETECTED_HOST_IP"
+    log OK "Preconfigured LiteLLM: $DETECTED_LITELLM_BASE"
+    log OK "Preconfigured Ollama:  $DETECTED_OLLAMA_BASE"
+  fi
 }
 
 ensure_path() {
@@ -168,7 +252,7 @@ ensure_path() {
 
 install_homebrew_if_needed() {
   step "Homebrew"
-  if command -v brew >/dev/null 2>&1; then
+  if command_exists brew; then
     log OK "Homebrew found"
     return
   fi
@@ -201,18 +285,17 @@ install_homebrew_if_needed() {
       } >> "$HOME/.zprofile"
     fi
   fi
-
   log OK "Homebrew installed"
 }
 
 install_node() {
   step "Node.js"
-  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  if command_exists node && command_exists npm; then
     log OK "Node $(node --version), npm $(npm --version)"
     return
   fi
 
-  if command -v brew >/dev/null 2>&1; then
+  if command_exists brew; then
     run brew install node
   else
     log ERR "Node.js missing and Homebrew unavailable. Install Node.js or allow Homebrew install."
@@ -237,7 +320,6 @@ configure_npm_global() {
       } >> "$HOME/.zshrc"
     fi
   fi
-
   log OK "npm prefix: $prefix"
 }
 
@@ -248,13 +330,13 @@ install_claude_code() {
     return
   fi
 
-  if command -v claude >/dev/null 2>&1; then
+  if command_exists claude; then
     log OK "Claude already available: $(claude --version || true)"
     return
   fi
 
   run npm install -g @anthropic-ai/claude-code
-  command -v claude >/dev/null 2>&1
+  command_exists claude
   log OK "Claude installed: $(claude --version || true)"
 }
 
@@ -264,7 +346,8 @@ default_gateway() {
 
 unique_candidates() {
   {
-    [[ -n "${HOST_IP:-}" ]] && echo "$HOST_IP"
+    [[ -n "$DETECTED_HOST_IP" ]] && echo "$DETECTED_HOST_IP"
+    [[ -n "$HOST_IP" ]] && echo "$HOST_IP"
     default_gateway
     echo "10.0.2.2"
     echo "192.168.64.1"
@@ -273,16 +356,30 @@ unique_candidates() {
   } | awk 'NF && !seen[$0]++'
 }
 
-probe_host() {
-  step "Host discovery"
-  local candidate proxy_url ollama_url
+probe_url() {
+  local url="$1"
+  curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY" "$url" >/dev/null 2>&1
+}
 
+probe_host() {
+  step "Host verification"
+
+  if [[ -n "$DETECTED_LITELLM_BASE" ]]; then
+    log INFO "Testing preconfigured LiteLLM: $DETECTED_LITELLM_BASE"
+    if probe_url "$DETECTED_LITELLM_BASE/v1/models"; then
+      log OK "Preconfigured LiteLLM is reachable"
+      return 0
+    fi
+    log WARN "Preconfigured LiteLLM did not respond; falling back to candidate probing"
+  fi
+
+  local candidate proxy_url ollama_url
   for candidate in $(unique_candidates); do
     proxy_url="http://$candidate:$LITELLM_PORT/v1/models"
     ollama_url="http://$candidate:$OLLAMA_PORT/api/tags"
     log INFO "Probing $proxy_url"
 
-    if curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY" "$proxy_url" >/dev/null 2>&1; then
+    if probe_url "$proxy_url"; then
       DETECTED_HOST_IP="$candidate"
       DETECTED_LITELLM_BASE="http://$candidate:$LITELLM_PORT"
       DETECTED_OLLAMA_BASE="http://$candidate:$OLLAMA_PORT"
@@ -297,8 +394,10 @@ probe_host() {
     fi
   done
 
-  log ERR "Could not detect Ubuntu host LiteLLM proxy"
-  echo "Run: HOST_IP=<ubuntu-host-ip> $0 install"
+  log ERR "Could not verify Ubuntu host LiteLLM proxy"
+  echo "Use one of:"
+  echo "  HOST_CONFIG_PATH=./macos-host-preconfig.env $0 install"
+  echo "  HOST_IP=<ubuntu-host-ip> $0 install"
   exit 1
 }
 
@@ -308,23 +407,31 @@ write_project_env() {
   env_dir="$(dirname "$PROJECT_ENV_PATH")"
   mkdir -p "$env_dir"
 
-  if [[ -f "$PROJECT_ENV_PATH" ]] && grep -q '^ANTHROPIC_' "$PROJECT_ENV_PATH"; then
+  if [[ -f "$PROJECT_ENV_PATH" && "$FORCE_ENV_REWRITE" == "1" ]]; then
     cp "$PROJECT_ENV_PATH" "$PROJECT_ENV_PATH.bak.$(date +%Y%m%d-%H%M%S)"
-    log WARN "Existing .env backed up before rewrite"
+    log WARN "Existing env backed up before rewrite"
+  elif [[ -f "$PROJECT_ENV_PATH" && "$FORCE_ENV_REWRITE" != "1" ]]; then
+    log WARN "Env exists and FORCE_ENV_REWRITE=0; leaving untouched"
+    return
   fi
 
-  cat > "$PROJECT_ENV_PATH" <<EOF
+  cat > "$PROJECT_ENV_PATH" <<ENVEOF
 ANTHROPIC_API_KEY=$LITELLM_KEY
 ANTHROPIC_BASE_URL=$DETECTED_LITELLM_BASE
 ANTHROPIC_MODEL=$MODEL_ALIAS
-EOF
+ENVEOF
   chmod 600 "$PROJECT_ENV_PATH"
 
   local gitignore_path="$env_dir/.gitignore"
   if [[ -f "$gitignore_path" ]]; then
     grep -qxF ".env" "$gitignore_path" || echo ".env" >> "$gitignore_path"
+    grep -qxF ".env.*" "$gitignore_path" || echo ".env.*" >> "$gitignore_path"
   else
-    echo ".env" > "$gitignore_path"
+    {
+      echo ".env"
+      echo ".env.*"
+      echo "!.env.example"
+    } > "$gitignore_path"
   fi
 
   log OK "Wrote $PROJECT_ENV_PATH"
@@ -333,7 +440,7 @@ EOF
 create_wrappers() {
   step "Client wrappers"
 
-  cat > "$BIN_DIR/claude-local" <<'EOF'
+  cat > "$BIN_DIR/claude-local" <<'CLAUDELOCAL'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -345,10 +452,10 @@ if [[ -f ".env" ]]; then
 fi
 
 exec claude "$@"
-EOF
+CLAUDELOCAL
   chmod +x "$BIN_DIR/claude-local"
 
-  cat > "$BIN_DIR/qwen-stack-status" <<EOF
+  cat > "$BIN_DIR/qwen-stack-status" <<STATUSEOF
 #!/usr/bin/env bash
 set -Eeuo pipefail
 MODEL_ALIAS="$MODEL_ALIAS"
@@ -365,7 +472,7 @@ echo
 curl -fsS -H "Authorization: Bearer \$LITELLM_KEY" "\$LITELLM_BASE/v1/models" >/dev/null && echo "  LiteLLM: \${GREEN}OK\${RESET}" || echo "  LiteLLM: \${RED}FAIL\${RESET}"
 curl -fsS "\$OLLAMA_BASE/api/tags" >/dev/null && echo "  Ollama:  \${GREEN}OK\${RESET}" || echo "  Ollama:  \${YELLOW}UNREACHABLE DIRECTLY\${RESET}"
 echo
-EOF
+STATUSEOF
   chmod +x "$BIN_DIR/qwen-stack-status"
 
   if [[ "$WRITE_SHELL_PROFILE" == "1" ]]; then
@@ -385,7 +492,7 @@ EOF
 
 write_status_json() {
   local elapsed="$(( $(date +%s) - START_TS ))"
-  cat > "$STATUS_JSON" <<EOF
+  cat > "$STATUS_JSON" <<JSONEOF
 {
   "status": "ready",
   "app": "$APP_NAME",
@@ -394,11 +501,12 @@ write_status_json() {
   "litellm_base_url": "$DETECTED_LITELLM_BASE",
   "ollama_base_url": "$DETECTED_OLLAMA_BASE",
   "project_env_path": "$PROJECT_ENV_PATH",
+  "persisted_host_config": "$PERSISTED_HOST_CONFIG",
   "log_file": "$LOG_FILE",
   "elapsed_seconds": $elapsed,
   "updated_at": "$(date -Iseconds)"
 }
-EOF
+JSONEOF
 }
 
 try_ollama_launch() {
@@ -407,7 +515,7 @@ try_ollama_launch() {
   fi
 
   step "Ollama launcher"
-  if command -v ollama >/dev/null 2>&1 && ollama launch --help >/dev/null 2>&1; then
+  if command_exists ollama && ollama launch --help >/dev/null 2>&1; then
     export OLLAMA_HOST="$DETECTED_OLLAMA_BASE"
     ollama launch claude --model "$MODEL_ALIAS" || true
   else
@@ -416,24 +524,26 @@ try_ollama_launch() {
 }
 
 print_env() {
-  if [[ -f "$PROJECT_ENV_PATH" ]]; then
-    cat "$PROJECT_ENV_PATH"
-  elif [[ -f .env ]]; then
-    cat .env
-  else
-    log WARN "No .env found"
-  fi
+  load_host_config || true
+  probe_host || true
+  cat <<ENVOUT
+ANTHROPIC_API_KEY=$LITELLM_KEY
+ANTHROPIC_BASE_URL=$DETECTED_LITELLM_BASE
+ANTHROPIC_MODEL=$MODEL_ALIAS
+ENVOUT
 }
 
 print_status() {
   banner
+  load_host_config || true
   ascii_topology
   echo "${BOLD}Local tools${RESET}"
-  command -v node >/dev/null 2>&1 && echo "  node:      $(node --version)" || echo "  node:      ${RED}missing${RESET}"
-  command -v npm >/dev/null 2>&1 && echo "  npm:       $(npm --version)" || echo "  npm:       ${RED}missing${RESET}"
-  command -v claude >/dev/null 2>&1 && echo "  claude:    $(claude --version || true)" || echo "  claude:    ${RED}missing${RESET}"
-  echo "  env:       ${PROJECT_ENV_PATH}"
-  echo "  log:       ${LOG_FILE}"
+  command_exists node && kv "node" "$(node --version)" || kv "node" "missing"
+  command_exists npm && kv "npm" "$(npm --version)" || kv "npm" "missing"
+  command_exists claude && kv "claude" "$(claude --version || true)" || kv "claude" "missing"
+  kv "env" "$PROJECT_ENV_PATH"
+  kv "host config" "$PERSISTED_HOST_CONFIG"
+  kv "log" "$LOG_FILE"
   echo
 
   if [[ -f "$STATUS_JSON" ]]; then
@@ -442,16 +552,14 @@ print_status() {
     echo
   fi
 
-  if [[ -n "${HOST_IP:-}" ]]; then
-    DETECTED_HOST_IP="$HOST_IP"
-    DETECTED_LITELLM_BASE="http://$HOST_IP:$LITELLM_PORT"
-    DETECTED_OLLAMA_BASE="http://$HOST_IP:$OLLAMA_PORT"
+  if [[ -n "$DETECTED_LITELLM_BASE" ]]; then
     curl -fsS -H "Authorization: Bearer $LITELLM_KEY" "$DETECTED_LITELLM_BASE/v1/models" >/dev/null 2>&1 && log OK "LiteLLM healthy" || log WARN "LiteLLM unreachable"
   fi
 }
 
 doctor() {
-  print_status
+  banner
+  load_host_config || true
   echo "${BOLD}Network candidates${RESET}"
   unique_candidates | sed 's/^/  - /'
   echo
@@ -460,6 +568,9 @@ doctor() {
   echo
   echo "${BOLD}DNS / network${RESET}"
   ping -c 1 1.1.1.1 >/dev/null 2>&1 && log OK "Internet reachable" || log WARN "Internet ping failed"
+  echo
+  probe_host || true
+  print_status
 }
 
 launch_claude() {
@@ -472,7 +583,7 @@ launch_claude() {
 uninstall_client() {
   step "Uninstall client generated files"
   rm -f "$BIN_DIR/claude-local" "$BIN_DIR/qwen-stack-status" "$STATUS_JSON"
-  log OK "Removed wrappers and status file. Project .env kept."
+  log OK "Removed wrappers and status file. Project .env and persisted host config kept."
 }
 
 summary() {
@@ -482,13 +593,14 @@ summary() {
   echo "${GREEN}${BOLD}║                              MAC CLIENT READY                               ║${RESET}"
   echo "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════════════════╝${RESET}"
   echo
-  echo "  Host IP:       $DETECTED_HOST_IP"
-  echo "  LiteLLM:       $DETECTED_LITELLM_BASE"
-  echo "  Ollama:        $DETECTED_OLLAMA_BASE"
-  echo "  Model:         $MODEL_ALIAS"
-  echo "  Env file:      $PROJECT_ENV_PATH"
-  echo "  Status JSON:   $STATUS_JSON"
-  echo "  Log file:      $LOG_FILE"
+  kv "Host IP" "$DETECTED_HOST_IP"
+  kv "LiteLLM" "$DETECTED_LITELLM_BASE"
+  kv "Ollama" "$DETECTED_OLLAMA_BASE"
+  kv "Model" "$MODEL_ALIAS"
+  kv "Env file" "$PROJECT_ENV_PATH"
+  kv "Host config" "$PERSISTED_HOST_CONFIG"
+  kv "Status JSON" "$STATUS_JSON"
+  kv "Log file" "$LOG_FILE"
   echo
   echo "${CYAN}${BOLD}Run:${RESET}"
   echo "  qwen-stack-status"
@@ -499,15 +611,24 @@ summary() {
   echo
 }
 
+import_host_only() {
+  banner
+  load_host_config
+  probe_host
+  write_status_json
+  log OK "Host config imported and verified"
+}
+
 install_client() {
   banner
+  load_host_config
+  probe_host
   ascii_topology
   ensure_path
   install_homebrew_if_needed
   install_node
   configure_npm_global
   install_claude_code
-  probe_host
   write_project_env
   create_wrappers
   try_ollama_launch
@@ -516,6 +637,7 @@ install_client() {
 
 case "${1:-install}" in
   install) install_client ;;
+  import-host) import_host_only ;;
   status) print_status ;;
   env) print_env ;;
   launch) launch_claude ;;

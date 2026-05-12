@@ -23,26 +23,18 @@ if [[ ! -f "$SOURCE_SCRIPT" ]]; then
   exit 1
 fi
 
-python3 - "$SOURCE_SCRIPT" "$PATCHED_SCRIPT" <<'PY'
-from __future__ import annotations
+OLD_MODEL_EXISTS='model_exists() { ollama list 2>/dev/null | awk '\''{print $1}'\'' | grep -Fxq "$MODEL_ALIAS"; }'
+NEW_MODEL_EXISTS='model_exists() { ollama list 2>/dev/null | awk '\''{print $1}'\'' | cut -d: -f1 | grep -Fxq "$MODEL_ALIAS"; }'
 
-import pathlib
-import sys
-
-source_path = pathlib.Path(sys.argv[1])
-patched_path = pathlib.Path(sys.argv[2])
-text = source_path.read_text(encoding="utf-8")
-old = "model_exists() { ollama list 2>/dev/null | awk '{print $1}' | grep -Fxq \"$MODEL_ALIAS\"; }"
-new = "model_exists() { ollama list 2>/dev/null | awk '{print $1}' | cut -d: -f1 | grep -Fxq \"$MODEL_ALIAS\"; }"
-if old not in text:
-    # Keep this wrapper forward-compatible if v2.1 is already patched later.
-    new_variant = new
-    if new_variant not in text:
-        raise SystemExit("Could not find expected model_exists implementation to patch")
-else:
-    text = text.replace(old, new, 1)
-patched_path.write_text(text, encoding="utf-8")
-PY
+if ! awk -v old="$OLD_MODEL_EXISTS" -v new="$NEW_MODEL_EXISTS" '
+  $0 == old { print new; patched = 1; next }
+  $0 == new { patched = 1 }
+  { print }
+  END { if (!patched) exit 42 }
+' "$SOURCE_SCRIPT" > "$PATCHED_SCRIPT"; then
+  echo "Could not patch or verify model_exists implementation in: $SOURCE_SCRIPT" >&2
+  exit 1
+fi
 
 chmod +x "$PATCHED_SCRIPT"
 exec "$PATCHED_SCRIPT" "$@"

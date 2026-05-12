@@ -1,0 +1,26 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+*.jsonl
+
+# Runtime state
+.local-state/
+.cache/
+.DS_Store
+
+# Node / Python noise
+node_modules/
+.npm-global/
+.venv/
+__pycache__/
+*.pyc
+
+# Temporary files
+*.tmp
+*.bak
+*.swp

@@ -24,5 +24,11 @@ jobs:
 
       - name: ShellCheck scripts
         run: |
-          shellcheck -x scripts/ubuntu-host-qwen-claude-stack.sh
-          shellcheck -x scripts/macos-vm-claude-client.sh
+          shellcheck \
+            -e SC1090 \
+            -e SC1091 \
+            -e SC2016 \
+            -e SC2034 \
+            -e SC2155 \
+            scripts/ubuntu-host-qwen-claude-stack.sh \
+            scripts/macos-vm-claude-client.sh

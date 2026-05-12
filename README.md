@@ -20,6 +20,24 @@ Ubuntu host
 
 The macOS VM remains the development workstation. The Ubuntu host does the model work, where NVIDIA/CUDA acceleration is available.
 
+## Terminal captures
+
+These captures show the actual script flow from a sandboxed scan/status run. They are included so the README previews the terminal UX before you run the installer on the real Ubuntu host.
+
+The sandbox does not expose your RTX 2070, local LAN, or systemd services, so the values shown here are illustrative. On your real Ubuntu host, the scan should show your i7-11700, RTX 2070, CUDA/NVIDIA driver, 32 GB RAM, and your LAN IP.
+
+### Deep system scan
+
+![Ubuntu host scan terminal capture](docs/images/terminal-scan-capture.svg)
+
+### Runtime topology and generated paths
+
+![Ubuntu host status topology terminal capture](docs/images/terminal-status-topology.svg)
+
+### Service health before full install
+
+![Ubuntu host service health terminal capture](docs/images/terminal-service-health.svg)
+
 ## What this repository contains
 
 ```text
@@ -28,6 +46,11 @@ The macOS VM remains the development workstation. The Ubuntu host does the model
 ├── .github/workflows/shellcheck.yml
 ├── .gitignore
 ├── README.md
+├── docs
+│   └── images
+│       ├── terminal-scan-capture.svg
+│       ├── terminal-service-health.svg
+│       └── terminal-status-topology.svg
 └── scripts
     ├── macos-vm-claude-client.sh
     └── ubuntu-host-qwen-claude-stack.sh
@@ -41,7 +64,7 @@ Default model:
 dagbs/qwen2.5-coder-7b-instruct-abliterated:q4_k_m
 ```
 
-The Ubuntu host script now performs a deep scan before install. It detects CPU, RAM, swap, free disk, primary network interface, host IP, NVIDIA GPU, VRAM, driver, CUDA version, systemd user status, and open ports. It writes scan artifacts and then auto-selects a practical model/context pair.
+The Ubuntu host script performs a deep scan before install. It detects CPU, RAM, swap, free disk, primary network interface, host IP, NVIDIA GPU, VRAM, driver, CUDA version, systemd user status, and open ports. It writes scan artifacts and then auto-selects a practical model/context pair.
 
 Auto tuning rules:
 

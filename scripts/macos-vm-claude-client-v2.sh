@@ -37,11 +37,25 @@ mkdir -p "$STATE_DIR" "$DATA_DIR" "$CONFIG_DIR" "$BIN_DIR"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 if command -v tput >/dev/null 2>&1 && [[ -t 1 ]]; then
-  BOLD="$(tput bold)"; DIM="$(tput dim)"; RESET="$(tput sgr0)"
-  RED="$(tput setaf 1)"; GREEN="$(tput setaf 2)"; YELLOW="$(tput setaf 3)"
-  BLUE="$(tput setaf 4)"; MAGENTA="$(tput setaf 5)"; CYAN="$(tput setaf 6)"
+  BOLD="$(tput bold)"
+  DIM="$(tput dim)"
+  RESET="$(tput sgr0)"
+  RED="$(tput setaf 1)"
+  GREEN="$(tput setaf 2)"
+  YELLOW="$(tput setaf 3)"
+  BLUE="$(tput setaf 4)"
+  MAGENTA="$(tput setaf 5)"
+  CYAN="$(tput setaf 6)"
 else
-  BOLD=""; DIM=""; RESET=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; MAGENTA=""; CYAN=""
+  BOLD=""
+  DIM=""
+  RESET=""
+  RED=""
+  GREEN=""
+  YELLOW=""
+  BLUE=""
+  MAGENTA=""
+  CYAN=""
 fi
 
 CURRENT_STEP="bootstrap"
@@ -51,7 +65,8 @@ DETECTED_LITELLM_BASE=""
 DETECTED_OLLAMA_BASE=""
 
 log() {
-  local level="$1"; shift || true
+  local level="$1"
+  shift || true
   local color="$RESET"
   case "$level" in
     OK) color="$GREEN" ;;
@@ -64,10 +79,24 @@ log() {
   printf "%s[%s]%s %s\n" "$color" "$level" "$RESET" "$*"
 }
 
-step() { CURRENT_STEP="$1"; echo; log STEP "$1"; }
-run() { log INFO "$*"; "$@"; }
-kv() { printf "%-22s %s\n" "$1:" "$2"; }
-command_exists() { command -v "$1" >/dev/null 2>&1; }
+step() {
+  CURRENT_STEP="$1"
+  echo
+  log STEP "$1"
+}
+
+run() {
+  log INFO "$*"
+  "$@"
+}
+
+kv() {
+  printf "%-22s %s\n" "$1:" "$2"
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
 
 on_error() {
   local exit_code=$?
@@ -162,6 +191,7 @@ TOPOLOGY
 
 shell_quote() { printf '%q' "$1"; }
 write_env_var() { printf '%s=%s\n' "$1" "$(shell_quote "$2")"; }
+json_str() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 find_host_config() {
   local candidates=()
@@ -172,7 +202,10 @@ find_host_config() {
   candidates+=("$DATA_DIR/host-connection.env")
   local candidate
   for candidate in "${candidates[@]}"; do
-    [[ -f "$candidate" ]] && { echo "$candidate"; return 0; }
+    [[ -f "$candidate" ]] && {
+      echo "$candidate"
+      return 0
+    }
   done
   return 1
 }
@@ -220,9 +253,15 @@ profiles_to_update() {
   local profiles=("$HOME/.zshrc" "$HOME/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile")
   local any="0" profile
   for profile in "${profiles[@]}"; do
-    [[ -f "$profile" ]] && { echo "$profile"; any="1"; }
+    [[ -f "$profile" ]] && {
+      echo "$profile"
+      any="1"
+    }
   done
-  [[ "$any" == "0" ]] && { touch "$HOME/.zshrc"; echo "$HOME/.zshrc"; }
+  [[ "$any" == "0" ]] && {
+    touch "$HOME/.zshrc"
+    echo "$HOME/.zshrc"
+  }
 }
 
 ensure_profile_line() {
@@ -243,8 +282,14 @@ ensure_path() {
 
 install_homebrew_if_needed() {
   step "Homebrew"
-  command_exists brew && { log OK "Homebrew found"; return; }
-  [[ "$INSTALL_BREW_IF_MISSING" != "1" ]] && { log WARN "Homebrew missing; INSTALL_BREW_IF_MISSING=0"; return; }
+  command_exists brew && {
+    log OK "Homebrew found"
+    return
+  }
+  [[ "$INSTALL_BREW_IF_MISSING" != "1" ]] && {
+    log WARN "Homebrew missing; INSTALL_BREW_IF_MISSING=0"
+    return
+  }
   log INFO "Installing Homebrew non-interactively"
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   if [[ -x /opt/homebrew/bin/brew ]]; then
@@ -262,7 +307,10 @@ install_node() {
     log OK "Node $(node --version), npm $(npm --version)"
     return
   fi
-  command_exists brew || { log ERR "Node.js missing and Homebrew unavailable. Install Node.js or allow Homebrew install."; exit 1; }
+  command_exists brew || {
+    log ERR "Node.js missing and Homebrew unavailable. Install Node.js or allow Homebrew install."
+    exit 1
+  }
   run brew install node
 }
 
@@ -278,8 +326,14 @@ configure_npm_global() {
 
 install_claude_code() {
   step "Claude Code CLI"
-  [[ "$INSTALL_CLAUDE_CODE" != "1" ]] && { log WARN "Skipping Claude Code install"; return; }
-  command_exists claude && { log OK "Claude already available: $(claude --version || true)"; return; }
+  [[ "$INSTALL_CLAUDE_CODE" != "1" ]] && {
+    log WARN "Skipping Claude Code install"
+    return
+  }
+  command_exists claude && {
+    log OK "Claude already available: $(claude --version || true)"
+    return
+  }
   run npm install -g @anthropic-ai/claude-code
   command_exists claude
   log OK "Claude installed: $(claude --version || true)"
@@ -424,14 +478,14 @@ write_status_json() {
   cat > "$STATUS_JSON" <<JSONEOF
 {
   "status": "ready",
-  "app": "$APP_NAME",
-  "model_alias": "$MODEL_ALIAS",
-  "host_ip": "$DETECTED_HOST_IP",
-  "litellm_base_url": "$DETECTED_LITELLM_BASE",
-  "ollama_base_url": "$DETECTED_OLLAMA_BASE",
-  "project_env_path": "$PROJECT_ENV_PATH",
-  "persisted_host_config": "$PERSISTED_HOST_CONFIG",
-  "log_file": "$LOG_FILE",
+  "app": "$(json_str "$APP_NAME")",
+  "model_alias": "$(json_str "$MODEL_ALIAS")",
+  "host_ip": "$(json_str "$DETECTED_HOST_IP")",
+  "litellm_base_url": "$(json_str "$DETECTED_LITELLM_BASE")",
+  "ollama_base_url": "$(json_str "$DETECTED_OLLAMA_BASE")",
+  "project_env_path": "$(json_str "$PROJECT_ENV_PATH")",
+  "persisted_host_config": "$(json_str "$PERSISTED_HOST_CONFIG")",
+  "log_file": "$(json_str "$LOG_FILE")",
   "elapsed_seconds": $elapsed,
   "updated_at": "$(date -Iseconds)"
 }
@@ -441,11 +495,11 @@ JSONEOF
 try_ollama_launch() {
   [[ "$TRY_OLLAMA_LAUNCH" == "1" ]] || return 0
   step "Ollama launcher"
-  if command_exists ollama && ollama launch --help >/dev/null 2>&1; then
+  if command_exists ollama && ollama run --help >/dev/null 2>&1; then
     export OLLAMA_HOST="$DETECTED_OLLAMA_BASE"
-    ollama launch claude --model "$MODEL_ALIAS" || true
+    ollama run "$MODEL_ALIAS" || true
   else
-    log WARN "ollama launch unavailable; using Claude Code env route"
+    log WARN "ollama run unavailable; using Claude Code env route"
   fi
 }
 
@@ -455,6 +509,16 @@ print_env() {
   write_env_var ANTHROPIC_API_KEY "$LITELLM_KEY"
   write_env_var ANTHROPIC_BASE_URL "$DETECTED_LITELLM_BASE"
   write_env_var ANTHROPIC_MODEL "$MODEL_ALIAS"
+}
+
+check_live_endpoints() {
+  if [[ -n "$DETECTED_LITELLM_BASE" && "$SKIP_PROBE" != "1" ]]; then
+    if curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY" "$DETECTED_LITELLM_BASE/v1/models" >/dev/null 2>&1; then
+      log OK "LiteLLM healthy"
+    else
+      log WARN "LiteLLM unreachable"
+    fi
+  fi
 }
 
 print_status() {
@@ -474,13 +538,7 @@ print_status() {
 
   [[ -f "$STATUS_JSON" ]] && { echo "${BOLD}Last status${RESET}"; cat "$STATUS_JSON"; echo; }
 
-  if [[ -n "$DETECTED_LITELLM_BASE" && "$SKIP_PROBE" != "1" ]]; then
-    if curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY" "$DETECTED_LITELLM_BASE/v1/models" >/dev/null 2>&1; then
-      log OK "LiteLLM healthy"
-    else
-      log WARN "LiteLLM unreachable"
-    fi
-  fi
+  check_live_endpoints
 }
 
 doctor() {

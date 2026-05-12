@@ -8,6 +8,7 @@
 #   - model_exists strips Ollama :tag suffixes before comparing aliases
 #   - health_json escapes JSON string fields
 #   - preflight_ports does not return failure when ports are healthy
+#   - LiteLLM drops Claude thinking/reasoning params before forwarding to Ollama
 #   - the active terminal banner is rendered as a stencil-wall topology
 #   - v2.2 runtime patch wrapper is no longer the public route
 
@@ -75,6 +76,28 @@ if old_preflight_guard in text:
 elif "return 0" not in re.search(r"preflight_ports\(\) \{.*?\n\}", text, re.S).group(0):
     raise SystemExit("Could not patch preflight_ports guard")
 
+old_litellm_settings = '''litellm_settings:
+  request_timeout: $REQUEST_TIMEOUT
+  num_retries: 2
+  drop_params: true
+  set_verbose: false'''
+new_litellm_settings = '''litellm_settings:
+  request_timeout: $REQUEST_TIMEOUT
+  num_retries: 2
+  drop_params: true
+  additional_drop_params:
+    - thinking
+    - think
+    - thinking_budget
+    - reasoning
+    - reasoning_effort
+    - include_reasoning
+  set_verbose: false'''
+if old_litellm_settings in text:
+    text = text.replace(old_litellm_settings, new_litellm_settings, 1)
+elif "additional_drop_params:" not in text:
+    raise SystemExit("Could not patch LiteLLM drop params")
+
 stencil_banner = r'''banner() {
   clear || true
   cat <<'ART'
@@ -118,8 +141,8 @@ stencil_banner = r'''banner() {
      |   ┌─────────────────────────────┐                     │                  |
      |   │ LiteLLM Proxy               │◄────────────────────┘                  |
      |   │ OpenAI-compatible API       │                                        |
-     |   │ LAN endpoint :4000          │      ("></")  rat@wall:~$ curl /models |
-     |   │ master key protected        │       / > spray                         |
+     |   │ LAN endpoint :4000          │      (">")  rat@wall:~$ curl /models  |
+     |   │ drops thinking params       │       / > spray                         |
      |   └──────────────┬──────────────┘                                        |
      |                  │                                                       |
      |                  ▼                                                       |

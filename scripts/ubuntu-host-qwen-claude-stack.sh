@@ -5,4 +5,4 @@
 
 set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "$SCRIPT_DIR/ubuntu-host-qwen-claude-stack-v3.sh" "$@"
+exec bash "$SCRIPT_DIR/ubuntu-host-qwen-claude-stack-v3.sh" "$@"

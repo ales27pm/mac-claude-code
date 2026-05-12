@@ -106,7 +106,17 @@ shell_quote() { printf '%q' "$1"; }
 write_env_var() { printf '%s=%s\n' "$1" "$(shell_quote "$2")"; }
 
 json_str() {
-  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+  awk 'BEGIN{RS=""; ORS=""}
+  {
+    gsub(/\\/,"\\\\");
+    gsub(/"/,"\\\"");
+    gsub(/\t/,"\\t");
+    gsub(/\r/,"\\r");
+    gsub(/\n/,"\\n");
+    gsub(/\f/,"\\f");
+    gsub(/\b/,"\\b");
+    printf "%s",$0
+  }' <<<"$1"
 }
 
 cleanup_started_children() {
@@ -417,7 +427,10 @@ preflight_ports() {
     fi
     rm -f "$tmpfile"
   done
-  [[ "$STRICT_PORT_CHECK" == "1" && "$conflict" == "1" ]] && { log ERR "Port conflict detected and STRICT_PORT_CHECK=1"; exit 1; }
+  if [[ "$STRICT_PORT_CHECK" == "1" && "$conflict" == "1" ]]; then
+    log ERR "Port conflict detected and STRICT_PORT_CHECK=1"
+    exit 1
+  fi
 }
 
 install_ollama() {
@@ -477,7 +490,7 @@ pull_model() {
 }
 
 wait_for_model_ready() {
-  local model="$1" attempts="${2:-20}" delay=2 i
+  local model="$1" attempts="${MODEL_READY_ATTEMPTS:-20}" delay="${MODEL_READY_DELAY_SEC:-2}" i
   log INFO "Waiting for model to appear in ollama list: $model"
   for ((i = 1; i <= attempts; i++)); do
     if ollama list 2>/dev/null | awk '{print $1}' | cut -d: -f1 | grep -Fxq "$model"; then
@@ -697,18 +710,21 @@ probe() {
     if command_exists jq; then
       response="$(printf '%s' "$raw_json" | jq -r '.response // empty' 2>/dev/null || true)"
     else
+      # Fallback parser for simple unescaped JSON response values only.
       response="$(printf '%s' "$raw_json" | awk -F'"response"[[:space:]]*:[[:space:]]*"' 'NF>1{split($2,a,"\""); print a[1]; exit}' || true)"
     fi
   fi
 
+  local health_state="ready"
   if [[ -n "$response" ]]; then
     echo "${DIM}${response}${RESET}"
     log OK "Smoke test passed"
   else
     log WARN "Smoke test returned empty response; model may still be loading"
+    health_state="degraded"
   fi
 
-  health_json "ready"
+  health_json "$health_state"
 }
 
 print_scan() { banner; collect_scan; auto_tune_from_scan; }

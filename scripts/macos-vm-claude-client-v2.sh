@@ -396,6 +396,7 @@ write_project_env() {
     cp "$PROJECT_ENV_PATH" "$PROJECT_ENV_PATH.bak.$(date +%Y%m%d-%H%M%S)"
     log WARN "Existing env backed up before rewrite"
   elif [[ -f "$PROJECT_ENV_PATH" && "$FORCE_ENV_REWRITE" != "1" ]]; then
+    check_auth_token_conflict "$PROJECT_ENV_PATH"
     log WARN "Env exists and FORCE_ENV_REWRITE=0; leaving untouched"
     return
   fi
@@ -459,8 +460,23 @@ if [[ -f "$_cfg" ]]; then
 elif [[ -f "$_data" ]]; then
   set -a; source "$_data"; set +a
 else
-  echo "No host-connection.env found. Run the installer first." >&2
-  exit 1
+  : "${MODEL_ALIAS:=qwen-coder-ablit}"
+  : "${LITELLM_KEY:=local-dev-key}"
+  if [[ -n "${LITELLM_BASE_URL:-}" ]]; then
+    LITELLM_BASE_URL="$LITELLM_BASE_URL"
+  elif [[ -n "${HOST_IP:-}" ]]; then
+    LITELLM_BASE_URL="http://${HOST_IP}:${LITELLM_PORT:-4000}"
+  else
+    LITELLM_BASE_URL="http://127.0.0.1:${LITELLM_PORT:-4000}"
+  fi
+  if [[ -n "${OLLAMA_HOST_URL:-}" ]]; then
+    OLLAMA_HOST_URL="$OLLAMA_HOST_URL"
+  elif [[ -n "${HOST_IP:-}" ]]; then
+    OLLAMA_HOST_URL="http://${HOST_IP}:${OLLAMA_PORT:-11434}"
+  else
+    OLLAMA_HOST_URL="http://127.0.0.1:${OLLAMA_PORT:-11434}"
+  fi
+  echo "No host-connection.env found; using environment/default endpoints." >&2
 fi
 
 MODEL_ALIAS="${MODEL_ALIAS:-qwen-coder-ablit}"

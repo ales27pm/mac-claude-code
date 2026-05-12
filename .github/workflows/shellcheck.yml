@@ -12,12 +12,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install ShellCheck
+      - name: Install shell tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y shellcheck
+          sudo apt-get install -y shellcheck shfmt
 
-      - name: Syntax and ShellCheck
+      - name: Syntax, ShellCheck, and formatting
         run: |
           find scripts -type f -name '*.sh' -print0 | while IFS= read -r -d '' script; do
             echo "Checking $script..."
@@ -29,4 +29,5 @@ jobs:
               -e SC2034 \
               -e SC2155 \
               "$script"
+            shfmt -d -i 2 -ci -sr "$script"
           done

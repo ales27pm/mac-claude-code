@@ -7,6 +7,7 @@
 # fixes before execution:
 #   - model_exists strips Ollama :tag suffixes before comparing aliases
 #   - health_json escapes JSON string fields
+#   - preflight_ports does not return failure when ports are healthy
 #   - the active terminal banner is rendered as a stencil-wall topology
 #   - v2.2 runtime patch wrapper is no longer the public route
 
@@ -63,6 +64,17 @@ if old_model_exists in text:
 elif "cut -d: -f1" not in text:
     raise SystemExit("Could not patch model_exists")
 
+old_preflight_guard = '[[ "$STRICT_PORT_CHECK" == "1" && "$conflict" == "1" ]] && { log ERR "Port conflict detected and STRICT_PORT_CHECK=1"; exit 1; }'
+new_preflight_guard = '''if [[ "$STRICT_PORT_CHECK" == "1" && "$conflict" == "1" ]]; then
+    log ERR "Port conflict detected and STRICT_PORT_CHECK=1"
+    exit 1
+  fi
+  return 0'''
+if old_preflight_guard in text:
+    text = text.replace(old_preflight_guard, new_preflight_guard, 1)
+elif "return 0" not in re.search(r"preflight_ports\(\) \{.*?\n\}", text, re.S).group(0):
+    raise SystemExit("Could not patch preflight_ports guard")
+
 stencil_banner = r'''banner() {
   clear || true
   cat <<'ART'
@@ -81,9 +93,9 @@ stencil_banner = r'''banner() {
 ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
         .-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''-.
-       /  WALL #11434 + #4000                                                 \
-      /  "THE CLOUD WAS JUST SOMEONE ELSE'S COMPUTER WITH BETTER MARKETING"    \
-     /__________________________________________________________________________\
+       /  WALL #11434 + #4000                                                 |
+      /  "THE CLOUD WAS JUST SOMEONE ELSE'S COMPUTER WITH BETTER MARKETING"    |
+     /__________________________________________________________________________|
      |                                                                          |
      |   ┌─────────────────────────────┐      ┌─────────────────────────────┐   |
      |   │ SYSTEM SCAN                 │      │ macOS PRECONFIG EXPORT      │   |

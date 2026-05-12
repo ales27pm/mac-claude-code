@@ -17,22 +17,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck
 
-      - name: Syntax check scripts
+      - name: Syntax and ShellCheck
         run: |
-          bash -n scripts/ubuntu-host-qwen-claude-stack.sh
-          bash -n scripts/macos-vm-claude-client.sh
-          bash -n scripts/ubuntu-host-qwen-claude-stack-v2.sh
-          bash -n scripts/macos-vm-claude-client-v2.sh
-
-      - name: ShellCheck scripts
-        run: |
-          shellcheck \
-            -e SC1090 \
-            -e SC1091 \
-            -e SC2016 \
-            -e SC2034 \
-            -e SC2155 \
-            scripts/ubuntu-host-qwen-claude-stack.sh \
-            scripts/macos-vm-claude-client.sh \
-            scripts/ubuntu-host-qwen-claude-stack-v2.sh \
-            scripts/macos-vm-claude-client-v2.sh
+          find scripts -type f -name '*.sh' -print0 | while IFS= read -r -d '' script; do
+            echo "Checking $script..."
+            bash -n "$script"
+            shellcheck \
+              -e SC1090 \
+              -e SC1091 \
+              -e SC2016 \
+              -e SC2034 \
+              -e SC2155 \
+              "$script"
+          done

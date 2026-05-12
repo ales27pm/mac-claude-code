@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-label="Terminal capture of Ubuntu host status topology">
+  <rect width="1280" height="900" rx="24" fill="#07111f"/>
+  <rect x="24" y="24" width="1232" height="852" rx="18" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+  <circle cx="58" cy="56" r="9" fill="#ef4444"/>
+  <circle cx="88" cy="56" r="9" fill="#f59e0b"/>
+  <circle cx="118" cy="56" r="9" fill="#22c55e"/>
+  <text x="640" y="62" text-anchor="middle" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">ubuntu-host-qwen-claude-stack.sh status</text>
+  <text x="54" y="108" fill="#e5e7eb" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">
+    <tspan x="54" dy="0" fill="#38bdf8">$ ./scripts/ubuntu-host-qwen-claude-stack.sh status</tspan>
+    <tspan x="54" dy="34" fill="#38bdf8">Runtime topology</tspan>
+    <tspan x="54" dy="34" fill="#e2e8f0">┌────────────────────────────────────────────────────────────────────┐</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">│ Ubuntu Host                                                        │</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">│ scan: CPU/RAM/GPU/network/systemd/firewall/ports                   │</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">└──────────────┬─────────────────────────────────────────────────────┘</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">               │ tune: model/context/service binding</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">               ▼</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      ┌───────────────────────┐</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      │ Ollama                │  http://172.26.44.7:11434</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      │ qwen-coder-ablit      │</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      │ dagbs/qwen2.5-coder-7b-instruct-abliterated:q4_k_m</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      └───────────┬───────────┘</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">                  │ localhost</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">                  ▼</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      ┌───────────────────────┐</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      │ LiteLLM Proxy         │  http://172.26.44.7:4000</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      │ OpenAI-compatible API │  key=local-dev-key</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">      └───────────┬───────────┘</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">                  │ generated host-connection.env</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">                  ▼</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">┌────────────────────────────────────────────────────────────────────┐</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">│ macOS VM                                                           │</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">│ Claude Code CLI via ANTHROPIC_API_KEY/BASE_URL/MODEL               │</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">└────────────────────────────────────────────────────────────────────┘</tspan>
+    <tspan x="54" dy="38" fill="#f8fafc">Paths</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">Base:                  ~/.local/share/mac-claude-code</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">Config:                ~/.local/share/mac-claude-code/config</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">Logs:                  ~/.local/state/mac-claude-code/logs</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">Status:                ~/.local/state/mac-claude-code/status.json</tspan>
+    <tspan x="54" dy="24" fill="#e2e8f0">macOS env:             ~/.local/share/mac-claude-code/macos-host-preconfig.env</tspan>
+  </text>
+  <text x="54" y="858" fill="#64748b" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">Capture generated from the status command in the execution sandbox. Host-specific addresses and service state vary per machine.</text>
+</svg>

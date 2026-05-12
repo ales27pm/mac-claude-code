@@ -415,6 +415,19 @@ write_project_env() {
     { echo ".env"; echo ".env.*"; echo "!.env.example"; } > "$gitignore_path"
   fi
   log OK "Wrote $PROJECT_ENV_PATH"
+  check_auth_token_conflict "$PROJECT_ENV_PATH"
+}
+
+
+check_auth_token_conflict() {
+  local env_file="${1:-$PROJECT_ENV_PATH}"
+  [[ -f "$env_file" ]] || return 0
+  if grep -qE '^[[:space:]]*ANTHROPIC_AUTH_TOKEN=' "$env_file"; then
+    log WARN "ANTHROPIC_AUTH_TOKEN is set in $env_file"
+    log WARN "This variable is only needed for first-run login detection."
+    log WARN "If Claude Code is already authenticated, remove it to avoid conflicts:"
+    log WARN "  sed -i '' '/^ANTHROPIC_AUTH_TOKEN=/d' $env_file"
+  fi
 }
 
 create_wrappers() {
@@ -434,36 +447,46 @@ exec claude "$@"
 CLAUDELOCAL
   chmod +x "$BIN_DIR/claude-local"
 
-  cat > "$BIN_DIR/qwen-stack-status" <<STATUSEOF
+  cat > "$BIN_DIR/qwen-stack-status" <<'STATUSEOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-MODEL_ALIAS="$MODEL_ALIAS"
-LITELLM_KEY="$LITELLM_KEY"
-LITELLM_BASE="$DETECTED_LITELLM_BASE"
-OLLAMA_BASE="$DETECTED_OLLAMA_BASE"
-GREEN="\\033[32m"
-RED="\\033[31m"
-YELLOW="\\033[33m"
-CYAN="\\033[36m"
-BOLD="\\033[1m"
-RESET="\\033[0m"
 
-echo -e "\n\${CYAN}\${BOLD}Qwen Claude Stack Status\${RESET}"
-echo "  model:    \$MODEL_ALIAS"
-echo "  litellm:  \$LITELLM_BASE"
-echo "  ollama:   \$OLLAMA_BASE"
-echo
+_cfg="${XDG_CONFIG_HOME:-$HOME/.config}/mac-claude-code/host-connection.env"
+_data="${HOME}/Library/Application Support/mac-claude-code/host-connection.env"
 
-if curl -fsS --connect-timeout 2 -H "Authorization: Bearer \$LITELLM_KEY" "\$LITELLM_BASE/v1/models" >/dev/null 2>&1; then
-  echo -e "  LiteLLM: \${GREEN}OK\${RESET}"
+if [[ -f "$_cfg" ]]; then
+  set -a; source "$_cfg"; set +a
+elif [[ -f "$_data" ]]; then
+  set -a; source "$_data"; set +a
 else
-  echo -e "  LiteLLM: \${RED}FAIL\${RESET}"
+  echo "No host-connection.env found. Run the installer first." >&2
+  exit 1
 fi
 
-if curl -fsS --connect-timeout 2 "\$OLLAMA_BASE/api/tags" >/dev/null 2>&1; then
-  echo -e "  Ollama:  \${GREEN}OK\${RESET}"
+MODEL_ALIAS="${MODEL_ALIAS:-qwen-coder-ablit}"
+LITELLM_KEY="${LITELLM_KEY:-local-dev-key}"
+LITELLM_BASE="${LITELLM_BASE_URL:-}"
+OLLAMA_BASE="${OLLAMA_HOST_URL:-}"
+
+GREEN="\033[32m"; RED="\033[31m"; YELLOW="\033[33m"
+CYAN="\033[36m"; BOLD="\033[1m"; RESET="\033[0m"
+
+echo -e "\n${CYAN}${BOLD}Qwen Claude stack status${RESET}"
+echo "  model:    $MODEL_ALIAS"
+echo "  litellm:  $LITELLM_BASE"
+echo "  ollama:   $OLLAMA_BASE"
+echo
+
+if curl -fsS --connect-timeout 2 -H "Authorization: Bearer $LITELLM_KEY"     "$LITELLM_BASE/v1/models" >/dev/null 2>&1; then
+  echo -e "  LiteLLM: ${GREEN}OK${RESET}"
 else
-  echo -e "  Ollama:  \${YELLOW}UNREACHABLE DIRECTLY\${RESET}"
+  echo -e "  LiteLLM: ${RED}FAIL${RESET}"
+fi
+
+if curl -fsS --connect-timeout 2 "$OLLAMA_BASE/api/tags" >/dev/null 2>&1; then
+  echo -e "  Ollama:  ${GREEN}OK${RESET}"
+else
+  echo -e "  Ollama:  ${YELLOW}UNREACHABLE DIRECTLY${RESET}"
 fi
 echo
 STATUSEOF
@@ -558,11 +581,13 @@ doctor() {
   fi
   echo
   probe_host || true
+  check_auth_token_conflict "$PROJECT_ENV_PATH"
   print_status
 }
 
 launch_claude() {
   [[ -f "$PROJECT_ENV_PATH" ]] && cd "$(dirname "$PROJECT_ENV_PATH")"
+  check_auth_token_conflict "$PROJECT_ENV_PATH"
   exec claude-local
 }
 

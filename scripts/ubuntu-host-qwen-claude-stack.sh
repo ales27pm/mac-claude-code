@@ -2,22 +2,21 @@
 # shellcheck shell=bash
 #
 # Ubuntu host installer for a local Claude Code-compatible coding stack:
-#   Ollama -> Qwen Coder abliterated -> LiteLLM OpenAI-compatible proxy -> macOS VM client
+#   system scan -> Ollama -> Qwen Coder abliterated -> LiteLLM proxy -> macOS VM preconfig
 #
-# Designed for repeated runs. It is idempotent, logged, defensive, and reversible enough
-# for a workstation/dev-machine setup.
+# Idempotent, terminal-only, logged, and designed for repeated repair runs.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
 
 APP_NAME="${APP_NAME:-mac-claude-code}"
 STACK_NAME="${STACK_NAME:-qwen-claude-stack}"
-MODEL_SOURCE="${MODEL_SOURCE:-dagbs/qwen2.5-coder-7b-instruct-abliterated:q4_k_m}"
+USER_MODEL_SOURCE="${MODEL_SOURCE:-}"
+USER_NUM_CTX="${NUM_CTX:-}"
 MODEL_ALIAS="${MODEL_ALIAS:-qwen-coder-ablit}"
 OLLAMA_PORT="${OLLAMA_PORT:-11434}"
 LITELLM_PORT="${LITELLM_PORT:-4000}"
 LITELLM_KEY="${LITELLM_KEY:-local-dev-key}"
-NUM_CTX="${NUM_CTX:-8192}"
 TEMPERATURE="${TEMPERATURE:-0.15}"
 TOP_P="${TOP_P:-0.90}"
 REPEAT_PENALTY="${REPEAT_PENALTY:-1.05}"
@@ -29,6 +28,11 @@ FORCE_RECREATE_MODEL="${FORCE_RECREATE_MODEL:-0}"
 FORCE_REINSTALL_LITELLM="${FORCE_REINSTALL_LITELLM:-0}"
 USE_SYSTEMD_USER="${USE_SYSTEMD_USER:-1}"
 OPEN_TO_LAN="${OPEN_TO_LAN:-1}"
+AUTO_TUNE_MODEL="${AUTO_TUNE_MODEL:-1}"
+AUTO_ENABLE_LINGER="${AUTO_ENABLE_LINGER:-1}"
+AUTO_FIX_PYTHON_VENV="${AUTO_FIX_PYTHON_VENV:-1}"
+AUTO_CONFIGURE_UFW="${AUTO_CONFIGURE_UFW:-1}"
+STRICT_PORT_CHECK="${STRICT_PORT_CHECK:-0}"
 
 BASE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/${APP_NAME}"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/${APP_NAME}"
@@ -38,7 +42,12 @@ CONFIG_DIR="$BASE_DIR/config"
 MODEL_DIR="$BASE_DIR/models/$MODEL_ALIAS"
 VENV_DIR="$BASE_DIR/venv"
 LITELLM_CONFIG="$CONFIG_DIR/litellm.yaml"
+STACK_ENV="$CONFIG_DIR/stack.env"
+SCAN_ENV="$CONFIG_DIR/host-scan.env"
+SCAN_TXT="$CONFIG_DIR/host-scan.txt"
 HOST_EXPORT="$BASE_DIR/host-connection.env"
+MAC_PRECONFIG="$BASE_DIR/macos-host-preconfig.env"
+MAC_BOOTSTRAP="$BASE_DIR/install-on-macos-vm.sh"
 STATUS_JSON="$STATE_DIR/status.json"
 SERVICE_NAME="${APP_NAME}-litellm.service"
 LOG_FILE="$LOG_DIR/host-$(date +%Y%m%d-%H%M%S).log"
@@ -56,6 +65,21 @@ fi
 
 CURRENT_STEP="bootstrap"
 START_TS="$(date +%s)"
+MODEL_SOURCE="${USER_MODEL_SOURCE:-dagbs/qwen2.5-coder-7b-instruct-abliterated:q4_k_m}"
+NUM_CTX="${USER_NUM_CTX:-8192}"
+HOST_PRIMARY_IP=""
+HOST_DEFAULT_IFACE=""
+HOST_DEFAULT_GATEWAY=""
+GPU_NAME="none"
+GPU_VRAM_MB="0"
+GPU_DRIVER="unknown"
+CUDA_VERSION="unknown"
+RAM_GB="0"
+SWAP_GB="0"
+CPU_MODEL="unknown"
+CPU_CORES="0"
+DISK_FREE_GB="0"
+SYSTEMD_USER_OK="0"
 
 on_error() {
   local exit_code=$?
@@ -64,9 +88,10 @@ on_error() {
   echo "${DIM}Log: $LOG_FILE${RESET}"
   echo
   echo "Quick probes:"
+  echo "  ./scripts/ubuntu-host-qwen-claude-stack.sh scan"
+  echo "  ./scripts/ubuntu-host-qwen-claude-stack.sh status"
+  echo "  ./scripts/ubuntu-host-qwen-claude-stack.sh logs"
   echo "  systemctl status ollama --no-pager || true"
-  echo "  journalctl -u ollama -n 80 --no-pager || true"
-  echo "  systemctl --user status $SERVICE_NAME --no-pager || true"
   echo "  curl -v http://127.0.0.1:$OLLAMA_PORT/api/tags"
   echo "  curl -v -H 'Authorization: Bearer $LITELLM_KEY' http://127.0.0.1:$LITELLM_PORT/v1/models"
   exit "$exit_code"
@@ -98,9 +123,13 @@ run() {
   "$@"
 }
 
+kv() {
+  printf "%-22s %s\n" "$1:" "$2"
+}
+
 banner() {
   clear || true
-  cat <<'EOF'
+  cat <<'ART'
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                              ║
 ║    ███╗   ███╗ █████╗  ██████╗      ██████╗██╗      █████╗ ██╗   ██╗██████╗ ║
@@ -110,70 +139,73 @@ banner() {
 ║    ██║ ╚═╝ ██║██║  ██║╚██████╗     ╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝║
 ║    ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝      ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ║
 ║                                                                              ║
-║          Ubuntu Host Installer: Ollama + Qwen Coder + LiteLLM Proxy          ║
+║     Ubuntu Host Autoconfig: scan → tune → Ollama → LiteLLM → macOS VM env     ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
-EOF
+ART
 }
 
 usage() {
-  cat <<EOF
+  cat <<USAGE
 Usage:
   ./scripts/ubuntu-host-qwen-claude-stack.sh [command]
 
 Commands:
-  install       Install/configure everything. Default.
+  install       Full scan + install/configure. Default.
+  scan          Deep host scan only. Writes $SCAN_ENV and $SCAN_TXT.
   status        Print stack status and health checks.
+  env           Print host connection env for the macOS VM.
+  mac-env       Same as env, plus copy instructions for the VM.
+  preconfigure  Regenerate macOS VM preconfiguration files only.
   logs          Tail recent LiteLLM/Ollama logs.
   restart       Restart Ollama and LiteLLM.
   stop          Stop LiteLLM user service only.
-  env           Print VM environment export values.
   uninstall     Remove LiteLLM service/venv/config only. Does not delete Ollama models.
   help          Show this help.
 
-Useful environment overrides:
+Useful overrides:
   MODEL_SOURCE=dagbs/qwen2.5-coder-7b-instruct-abliterated:q5_k_m
   MODEL_ALIAS=qwen-coder-ablit
   NUM_CTX=8192
   LITELLM_KEY=local-dev-key
   OPEN_TO_LAN=1
+  AUTO_TUNE_MODEL=1
   SKIP_MODEL_PULL=1
+  FORCE_RECREATE_MODEL=1
   FORCE_REINSTALL_LITELLM=1
-EOF
+USAGE
 }
 
 ascii_topology() {
-  cat <<EOF
+  cat <<TOPOLOGY
 
-${BLUE}${BOLD}Topology${RESET}
+${BLUE}${BOLD}Runtime topology${RESET}
 
-  ┌──────────────────────────────────────────────────────────────┐
-  │ Ubuntu Host                                                   │
-  │ CPU/RAM + NVIDIA GPU if available                            │
-  └──────────────┬───────────────────────────────────────────────┘
-                 │
-                 │ http://0.0.0.0:$OLLAMA_PORT
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ Ubuntu Host                                                        │
+  │ scan: CPU/RAM/GPU/network/systemd/firewall/ports                   │
+  └──────────────┬─────────────────────────────────────────────────────┘
+                 │ tune: model/context/service binding
                  ▼
         ┌───────────────────────┐
-        │ Ollama                │
+        │ Ollama                │  http://${HOST_PRIMARY_IP:-HOST_IP}:$OLLAMA_PORT
         │ $MODEL_ALIAS
         │ $MODEL_SOURCE
         └───────────┬───────────┘
                     │ localhost
                     ▼
         ┌───────────────────────┐
-        │ LiteLLM Proxy         │
-        │ OpenAI-compatible API │
-        │ http://0.0.0.0:$LITELLM_PORT
+        │ LiteLLM Proxy         │  http://${HOST_PRIMARY_IP:-HOST_IP}:$LITELLM_PORT
+        │ OpenAI-compatible API │  key=$LITELLM_KEY
         └───────────┬───────────┘
-                    │ LAN / VM NAT bridge
+                    │ generated host-connection.env
                     ▼
-  ┌──────────────────────────────────────────────────────────────┐
-  │ macOS VM                                                      │
-  │ Claude Code CLI via ANTHROPIC_* environment variables         │
-  └──────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ macOS VM                                                           │
+  │ Claude Code CLI via ANTHROPIC_API_KEY/BASE_URL/MODEL               │
+  └────────────────────────────────────────────────────────────────────┘
 
-EOF
+TOPOLOGY
 }
 
 require_sudo() {
@@ -181,6 +213,154 @@ require_sudo() {
     log WARN "sudo required; requesting elevation"
     sudo true
   fi
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+systemd_available() {
+  command_exists systemctl && [[ "$(ps -p 1 -o comm= 2>/dev/null || true)" == "systemd" ]]
+}
+
+systemd_user_available() {
+  systemctl --user status >/dev/null 2>&1
+}
+
+host_ips() {
+  ip -4 addr show scope global 2>/dev/null \
+    | awk '/inet / {print $2}' \
+    | cut -d/ -f1 \
+    | grep -v '^127\.' \
+    | awk '!seen[$0]++' || true
+}
+
+default_iface() {
+  ip route show default 2>/dev/null | awk '/default/ {for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}' || true
+}
+
+default_gateway() {
+  ip route show default 2>/dev/null | awk '/default/ {print $3; exit}' || true
+}
+
+primary_ip() {
+  local iface ipaddr
+  iface="$(default_iface)"
+  if [[ -n "$iface" ]]; then
+    ipaddr="$(ip -4 addr show dev "$iface" scope global 2>/dev/null | awk '/inet / {print $2; exit}' | cut -d/ -f1 || true)"
+    [[ -n "$ipaddr" ]] && echo "$ipaddr" && return 0
+  fi
+  host_ips | head -n 1 || true
+}
+
+collect_scan() {
+  step "Deep system scan"
+  HOST_DEFAULT_IFACE="$(default_iface)"
+  HOST_DEFAULT_GATEWAY="$(default_gateway)"
+  HOST_PRIMARY_IP="$(primary_ip)"
+  CPU_MODEL="$(awk -F: '/model name/ {gsub(/^[ \t]+/, "", $2); print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
+  CPU_CORES="$(nproc 2>/dev/null || echo 0)"
+  RAM_GB="$(awk '/MemTotal/ {printf "%.1f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+  SWAP_GB="$(awk '/SwapTotal/ {printf "%.1f", $2/1024/1024}' /proc/meminfo 2>/dev/null || echo 0)"
+  DISK_FREE_GB="$(df -BG "$HOME" 2>/dev/null | awk 'NR==2 {gsub(/G/, "", $4); print $4}' || echo 0)"
+
+  if command_exists nvidia-smi; then
+    GPU_NAME="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 || echo none)"
+    GPU_VRAM_MB="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1 || echo 0)"
+    GPU_DRIVER="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -n 1 || echo unknown)"
+    CUDA_VERSION="$(nvidia-smi 2>/dev/null | awk -F'CUDA Version: ' '/CUDA Version/ {split($2,a," "); print a[1]; exit}' || echo unknown)"
+  fi
+
+  if systemd_user_available; then SYSTEMD_USER_OK="1"; else SYSTEMD_USER_OK="0"; fi
+
+  cat > "$SCAN_ENV" <<SCANEOF
+HOST_PRIMARY_IP=$HOST_PRIMARY_IP
+HOST_DEFAULT_IFACE=$HOST_DEFAULT_IFACE
+HOST_DEFAULT_GATEWAY=$HOST_DEFAULT_GATEWAY
+CPU_MODEL=$CPU_MODEL
+CPU_CORES=$CPU_CORES
+RAM_GB=$RAM_GB
+SWAP_GB=$SWAP_GB
+DISK_FREE_GB=$DISK_FREE_GB
+GPU_NAME=$GPU_NAME
+GPU_VRAM_MB=$GPU_VRAM_MB
+GPU_DRIVER=$GPU_DRIVER
+CUDA_VERSION=$CUDA_VERSION
+SYSTEMD_USER_OK=$SYSTEMD_USER_OK
+SCANEOF
+  chmod 600 "$SCAN_ENV"
+
+  {
+    echo "mac-claude-code host scan"
+    echo "generated_at=$(date -Iseconds)"
+    echo
+    kv "host" "$(hostname 2>/dev/null || true)"
+    kv "os" "$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-unknown}" || echo unknown)"
+    kv "kernel" "$(uname -r)"
+    kv "arch" "$(uname -m)"
+    kv "cpu" "$CPU_MODEL"
+    kv "cores" "$CPU_CORES"
+    kv "ram_gb" "$RAM_GB"
+    kv "swap_gb" "$SWAP_GB"
+    kv "disk_free_gb" "$DISK_FREE_GB"
+    kv "gpu" "$GPU_NAME"
+    kv "gpu_vram_mb" "$GPU_VRAM_MB"
+    kv "nvidia_driver" "$GPU_DRIVER"
+    kv "cuda" "$CUDA_VERSION"
+    kv "default_iface" "$HOST_DEFAULT_IFACE"
+    kv "gateway" "$HOST_DEFAULT_GATEWAY"
+    kv "primary_ip" "$HOST_PRIMARY_IP"
+    echo "all_ips:"
+    host_ips | sed 's/^/  - /'
+  } > "$SCAN_TXT"
+
+  echo "${BOLD}System scan${RESET}"
+  cat "$SCAN_TXT"
+  log OK "Scan written: $SCAN_ENV"
+  log OK "Scan report:  $SCAN_TXT"
+}
+
+auto_tune_from_scan() {
+  step "Auto tuning"
+  if [[ "$AUTO_TUNE_MODEL" != "1" ]]; then
+    log WARN "AUTO_TUNE_MODEL=0; preserving MODEL_SOURCE=$MODEL_SOURCE NUM_CTX=$NUM_CTX"
+    return
+  fi
+
+  if [[ -z "$USER_MODEL_SOURCE" ]]; then
+    if [[ "$GPU_VRAM_MB" =~ ^[0-9]+$ ]] && (( GPU_VRAM_MB >= 11000 )); then
+      MODEL_SOURCE="dagbs/qwen2.5-coder-7b-instruct-abliterated:q5_k_m"
+    elif [[ "$GPU_VRAM_MB" =~ ^[0-9]+$ ]] && (( GPU_VRAM_MB >= 7000 )); then
+      MODEL_SOURCE="dagbs/qwen2.5-coder-7b-instruct-abliterated:q4_k_m"
+    elif [[ "$GPU_VRAM_MB" =~ ^[0-9]+$ ]] && (( GPU_VRAM_MB >= 5000 )); then
+      MODEL_SOURCE="dagbs/qwen2.5-coder-7b-instruct-abliterated:iq4_xs"
+    else
+      MODEL_SOURCE="dagbs/qwen2.5-coder-7b-instruct-abliterated:q3_k_m"
+    fi
+  fi
+
+  if [[ -z "$USER_NUM_CTX" ]]; then
+    if [[ "$GPU_VRAM_MB" =~ ^[0-9]+$ ]] && (( GPU_VRAM_MB >= 11000 )); then
+      NUM_CTX="12288"
+    elif [[ "$GPU_VRAM_MB" =~ ^[0-9]+$ ]] && (( GPU_VRAM_MB >= 7000 )); then
+      NUM_CTX="8192"
+    else
+      NUM_CTX="4096"
+    fi
+  fi
+
+  cat > "$STACK_ENV" <<STACKEOF
+MODEL_SOURCE=$MODEL_SOURCE
+MODEL_ALIAS=$MODEL_ALIAS
+NUM_CTX=$NUM_CTX
+OLLAMA_PORT=$OLLAMA_PORT
+LITELLM_PORT=$LITELLM_PORT
+LITELLM_KEY=$LITELLM_KEY
+STACKEOF
+  chmod 600 "$STACK_ENV"
+
+  log OK "Selected model: $MODEL_SOURCE"
+  log OK "Selected context: $NUM_CTX"
 }
 
 os_guard() {
@@ -205,24 +385,34 @@ apt_install_base() {
   fi
   require_sudo
   run sudo apt-get update
-  run sudo apt-get install -y curl ca-certificates jq python3 python3-venv python3-pip lsof net-tools iproute2 ufw procps gawk
+  run sudo apt-get install -y curl ca-certificates jq python3 python3-venv python3-pip lsof net-tools iproute2 ufw procps gawk coreutils
 }
 
-detect_gpu() {
-  step "GPU detection"
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    nvidia-smi || true
-    local gpu_name="unknown"
-    gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n 1 || true)"
-    log OK "NVIDIA detected: ${gpu_name:-unknown}"
-  else
-    log WARN "nvidia-smi not found. Ollama may run CPU-only. Install NVIDIA drivers/CUDA runtime if needed."
+preflight_ports() {
+  step "Port preflight"
+  local conflict="0"
+  for port in "$OLLAMA_PORT" "$LITELLM_PORT"; do
+    if command_exists lsof && lsof -iTCP:"$port" -sTCP:LISTEN -n -P >"/tmp/${APP_NAME}-port-${port}.txt" 2>/dev/null; then
+      if grep -E 'ollama|litellm|python' "/tmp/${APP_NAME}-port-${port}.txt" >/dev/null 2>&1; then
+        log OK "Port $port already used by expected stack process"
+      else
+        log WARN "Port $port is already in use by another process:"
+        cat "/tmp/${APP_NAME}-port-${port}.txt"
+        conflict="1"
+      fi
+    else
+      log OK "Port $port is free"
+    fi
+  done
+  if [[ "$STRICT_PORT_CHECK" == "1" && "$conflict" == "1" ]]; then
+    log ERR "Port conflict detected and STRICT_PORT_CHECK=1"
+    exit 1
   fi
 }
 
 install_ollama() {
   step "Ollama installation"
-  if command -v ollama >/dev/null 2>&1; then
+  if command_exists ollama; then
     log OK "Ollama found: $(ollama --version || true)"
   else
     log INFO "Installing Ollama from official installer"
@@ -237,16 +427,16 @@ configure_ollama_service() {
     host_bind="0.0.0.0:$OLLAMA_PORT"
   fi
 
-  if systemctl list-unit-files | grep -q '^ollama.service'; then
+  if systemd_available && systemctl list-unit-files | grep -q '^ollama.service'; then
     require_sudo
     sudo mkdir -p /etc/systemd/system/ollama.service.d
-    sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null <<EOF
+    sudo tee /etc/systemd/system/ollama.service.d/override.conf >/dev/null <<SERVICEEOF
 [Service]
 Environment="OLLAMA_HOST=$host_bind"
 Environment="OLLAMA_NUM_PARALLEL=1"
 Environment="OLLAMA_MAX_LOADED_MODELS=1"
 Environment="OLLAMA_KEEP_ALIVE=30m"
-EOF
+SERVICEEOF
     run sudo systemctl daemon-reload
     run sudo systemctl enable ollama
     run sudo systemctl restart ollama
@@ -255,7 +445,7 @@ EOF
   else
     log WARN "No systemd Ollama service found. Launching temporary server in background."
     pkill -f "ollama serve" || true
-    nohup env OLLAMA_HOST="$host_bind" OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 ollama serve >"$LOG_DIR/ollama-serve.log" 2>&1 &
+    nohup env OLLAMA_HOST="$host_bind" OLLAMA_NUM_PARALLEL=1 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_KEEP_ALIVE=30m ollama serve >"$LOG_DIR/ollama-serve.log" 2>&1 &
     sleep 3
   fi
 }
@@ -268,13 +458,9 @@ wait_for_http() {
   local i
   for ((i=1; i<=attempts; i++)); do
     if [[ -n "$header_arg" ]]; then
-      if curl -fsS --connect-timeout 2 -H "$header_arg" "$url" >/dev/null 2>&1; then
-        return 0
-      fi
+      if curl -fsS --connect-timeout 2 -H "$header_arg" "$url" >/dev/null 2>&1; then return 0; fi
     else
-      if curl -fsS --connect-timeout 2 "$url" >/dev/null 2>&1; then
-        return 0
-      fi
+      if curl -fsS --connect-timeout 2 "$url" >/dev/null 2>&1; then return 0; fi
     fi
     printf "%s" "${DIM}.${RESET}"
     sleep "$delay"
@@ -289,6 +475,7 @@ pull_model() {
     log WARN "Skipping model pull"
     return
   fi
+  wait_for_http "http://127.0.0.1:$OLLAMA_PORT/api/tags" "" 30 1
   run ollama pull "$MODEL_SOURCE"
   log OK "Pulled: $MODEL_SOURCE"
 }
@@ -299,7 +486,7 @@ model_exists() {
 
 create_wrapper_model() {
   step "Wrapper model"
-  cat > "$MODEL_DIR/Modelfile" <<EOF
+  cat > "$MODEL_DIR/Modelfile" <<MODELEOF
 FROM $MODEL_SOURCE
 
 PARAMETER num_ctx $NUM_CTX
@@ -319,7 +506,7 @@ Operational rules:
 - Preserve existing architecture unless a refactor is clearly justified.
 - Be direct.
 """
-EOF
+MODELEOF
 
   if model_exists && [[ "$FORCE_RECREATE_MODEL" != "1" ]]; then
     log OK "Wrapper model already exists: $MODEL_ALIAS"
@@ -331,6 +518,10 @@ EOF
 
 install_litellm() {
   step "LiteLLM installation"
+  if [[ "$AUTO_FIX_PYTHON_VENV" == "1" && ! -d /usr/lib/python3/dist-packages && "$SKIP_APT" != "1" ]]; then
+    log WARN "Python dist-packages path unusual; continuing with venv creation"
+  fi
+
   if [[ "$FORCE_REINSTALL_LITELLM" == "1" && -d "$VENV_DIR" ]]; then
     log WARN "Removing existing venv because FORCE_REINSTALL_LITELLM=1"
     rm -rf "$VENV_DIR"
@@ -344,7 +535,7 @@ install_litellm() {
     log OK "LiteLLM already installed in $VENV_DIR"
   fi
 
-  cat > "$LITELLM_CONFIG" <<EOF
+  cat > "$LITELLM_CONFIG" <<LITEEOF
 model_list:
   - model_name: $MODEL_ALIAS
     litellm_params:
@@ -364,15 +555,31 @@ litellm_settings:
   num_retries: 2
   drop_params: true
   set_verbose: false
-EOF
+LITEEOF
   chmod 600 "$LITELLM_CONFIG"
   log OK "LiteLLM config: $LITELLM_CONFIG"
+}
+
+enable_linger_if_needed() {
+  if [[ "$AUTO_ENABLE_LINGER" != "1" ]]; then
+    return
+  fi
+  if command_exists loginctl && systemd_available; then
+    step "User service persistence"
+    if loginctl show-user "$USER" 2>/dev/null | grep -q '^Linger=yes'; then
+      log OK "User linger already enabled for $USER"
+    else
+      require_sudo
+      run sudo loginctl enable-linger "$USER"
+      log OK "Enabled user linger for $USER"
+    fi
+  fi
 }
 
 start_litellm_service() {
   step "LiteLLM service"
   mkdir -p "$HOME/.config/systemd/user"
-  cat > "$HOME/.config/systemd/user/$SERVICE_NAME" <<EOF
+  cat > "$HOME/.config/systemd/user/$SERVICE_NAME" <<USERSERVICEEOF
 [Unit]
 Description=mac-claude-code LiteLLM Proxy
 After=network-online.target
@@ -387,9 +594,9 @@ Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=default.target
-EOF
+USERSERVICEEOF
 
-  if [[ "$USE_SYSTEMD_USER" == "1" ]] && systemctl --user status >/dev/null 2>&1; then
+  if [[ "$USE_SYSTEMD_USER" == "1" ]] && systemd_user_available; then
     run systemctl --user daemon-reload
     run systemctl --user enable --now "$SERVICE_NAME"
     sleep 3
@@ -404,11 +611,11 @@ EOF
 
 configure_firewall() {
   step "Firewall"
-  if [[ "$SKIP_FIREWALL" == "1" ]]; then
+  if [[ "$SKIP_FIREWALL" == "1" || "$AUTO_CONFIGURE_UFW" != "1" ]]; then
     log WARN "Skipping firewall changes"
     return
   fi
-  if command -v ufw >/dev/null 2>&1 && sudo ufw status | grep -q "Status: active"; then
+  if command_exists ufw && sudo ufw status | grep -q "Status: active"; then
     require_sudo
     run sudo ufw allow "$OLLAMA_PORT/tcp"
     run sudo ufw allow "$LITELLM_PORT/tcp"
@@ -418,36 +625,88 @@ configure_firewall() {
   fi
 }
 
-host_ips() {
-  ip -4 addr show scope global \
-    | awk '/inet / {print $2}' \
-    | cut -d/ -f1 \
-    | grep -v '^127\.' \
-    | awk '!seen[$0]++' || true
+write_exports() {
+  [[ -z "$HOST_PRIMARY_IP" ]] && HOST_PRIMARY_IP="$(primary_ip)"
+  cat > "$HOST_EXPORT" <<HOSTEXPORT
+# Generated by $APP_NAME on $(date -Iseconds)
+HOST_IP=$HOST_PRIMARY_IP
+HOST_DEFAULT_IFACE=$HOST_DEFAULT_IFACE
+HOST_DEFAULT_GATEWAY=$HOST_DEFAULT_GATEWAY
+MODEL_ALIAS=$MODEL_ALIAS
+MODEL_SOURCE=$MODEL_SOURCE
+NUM_CTX=$NUM_CTX
+OLLAMA_PORT=$OLLAMA_PORT
+LITELLM_PORT=$LITELLM_PORT
+OLLAMA_HOST_URL=http://$HOST_PRIMARY_IP:$OLLAMA_PORT
+LITELLM_BASE_URL=http://$HOST_PRIMARY_IP:$LITELLM_PORT
+LITELLM_KEY=$LITELLM_KEY
+ANTHROPIC_API_KEY=$LITELLM_KEY
+ANTHROPIC_BASE_URL=http://$HOST_PRIMARY_IP:$LITELLM_PORT
+ANTHROPIC_MODEL=$MODEL_ALIAS
+HOSTEXPORT
+  chmod 600 "$HOST_EXPORT"
+  cp "$HOST_EXPORT" "$MAC_PRECONFIG"
+  chmod 600 "$MAC_PRECONFIG"
+}
+
+write_macos_bootstrap() {
+  cat > "$MAC_BOOTSTRAP" <<'MACBOOTEOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ ! -f ./macos-host-preconfig.env && -f ./host-connection.env ]]; then
+  cp ./host-connection.env ./macos-host-preconfig.env
+fi
+
+if [[ -f ./macos-host-preconfig.env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source ./macos-host-preconfig.env
+  set +a
+fi
+
+chmod +x scripts/macos-vm-claude-client.sh
+HOST_CONFIG_PATH="${HOST_CONFIG_PATH:-$(pwd)/macos-host-preconfig.env}" \
+  ./scripts/macos-vm-claude-client.sh install
+MACBOOTEOF
+  chmod +x "$MAC_BOOTSTRAP"
+}
+
+preconfigure_macos_files() {
+  step "macOS VM preconfiguration"
+  write_exports
+  write_macos_bootstrap
+  log OK "Host connection env: $HOST_EXPORT"
+  log OK "macOS preconfig env:  $MAC_PRECONFIG"
+  log OK "macOS bootstrap:      $MAC_BOOTSTRAP"
 }
 
 health_json() {
   local status="$1"
   local elapsed="$(( $(date +%s) - START_TS ))"
-  local first_ip
-  first_ip="$(host_ips | head -n 1 || true)"
-  cat > "$STATUS_JSON" <<EOF
+  [[ -z "$HOST_PRIMARY_IP" ]] && HOST_PRIMARY_IP="$(primary_ip)"
+  cat > "$STATUS_JSON" <<STATUSEOF
 {
   "status": "$status",
   "app": "$APP_NAME",
   "model_alias": "$MODEL_ALIAS",
   "model_source": "$MODEL_SOURCE",
   "num_ctx": $NUM_CTX,
+  "gpu_name": "$GPU_NAME",
+  "gpu_vram_mb": "$GPU_VRAM_MB",
+  "ram_gb": "$RAM_GB",
+  "host_ip": "$HOST_PRIMARY_IP",
   "ollama_port": $OLLAMA_PORT,
   "litellm_port": $LITELLM_PORT,
-  "host_ip": "${first_ip:-}",
-  "litellm_base_url": "http://${first_ip:-127.0.0.1}:$LITELLM_PORT",
-  "ollama_base_url": "http://${first_ip:-127.0.0.1}:$OLLAMA_PORT",
+  "litellm_base_url": "http://$HOST_PRIMARY_IP:$LITELLM_PORT",
+  "ollama_base_url": "http://$HOST_PRIMARY_IP:$OLLAMA_PORT",
+  "scan_env": "$SCAN_ENV",
+  "host_export": "$HOST_EXPORT",
   "log_file": "$LOG_FILE",
   "elapsed_seconds": $elapsed,
   "updated_at": "$(date -Iseconds)"
 }
-EOF
+STATUSEOF
 }
 
 probe() {
@@ -468,78 +727,81 @@ probe() {
     -d "{\"model\":\"$MODEL_ALIAS\",\"prompt\":\"Return exactly LOCAL_QWEN_READY and nothing else.\",\"stream\":false}" \
     | jq -r '.response' || true)"
   echo "${DIM}${response}${RESET}"
-
   health_json "ready"
 }
 
-write_exports() {
-  local first_ip
-  first_ip="$(host_ips | head -n 1 || true)"
-  cat > "$HOST_EXPORT" <<EOF
-# Generated by $APP_NAME on $(date -Iseconds)
-MODEL_ALIAS=$MODEL_ALIAS
-MODEL_SOURCE=$MODEL_SOURCE
-OLLAMA_HOST_URL=http://${first_ip:-127.0.0.1}:$OLLAMA_PORT
-LITELLM_BASE_URL=http://${first_ip:-127.0.0.1}:$LITELLM_PORT
-LITELLM_KEY=$LITELLM_KEY
-ANTHROPIC_API_KEY=$LITELLM_KEY
-ANTHROPIC_BASE_URL=http://${first_ip:-127.0.0.1}:$LITELLM_PORT
-ANTHROPIC_MODEL=$MODEL_ALIAS
-EOF
-  chmod 600 "$HOST_EXPORT"
+print_scan() {
+  banner
+  collect_scan
+  auto_tune_from_scan
 }
 
 print_status() {
   banner
+  [[ -f "$SCAN_ENV" ]] && log INFO "Loading scan env: $SCAN_ENV" && set -a && source "$SCAN_ENV" && set +a || true
+  HOST_PRIMARY_IP="$(primary_ip)"
   ascii_topology
   echo "${BOLD}Paths${RESET}"
-  echo "  Base:       $BASE_DIR"
-  echo "  Config:     $CONFIG_DIR"
-  echo "  Logs:       $LOG_DIR"
-  echo "  Status:     $STATUS_JSON"
+  kv "Base" "$BASE_DIR"
+  kv "Config" "$CONFIG_DIR"
+  kv "Logs" "$LOG_DIR"
+  kv "Status" "$STATUS_JSON"
+  kv "macOS env" "$MAC_PRECONFIG"
+  echo
+  echo "${BOLD}Scan summary${RESET}"
+  kv "CPU" "$CPU_MODEL"
+  kv "Cores" "$CPU_CORES"
+  kv "RAM GB" "$RAM_GB"
+  kv "GPU" "$GPU_NAME"
+  kv "VRAM MB" "$GPU_VRAM_MB"
+  kv "Primary IP" "$HOST_PRIMARY_IP"
   echo
   echo "${BOLD}Services${RESET}"
-  if systemctl list-unit-files 2>/dev/null | grep -q '^ollama.service'; then
+  if systemd_available && systemctl list-unit-files 2>/dev/null | grep -q '^ollama.service'; then
     systemctl is-active ollama >/dev/null 2>&1 && echo "  Ollama:     ${GREEN}active${RESET}" || echo "  Ollama:     ${RED}inactive${RESET}"
   else
     echo "  Ollama:     ${YELLOW}no system service detected${RESET}"
   fi
-  if systemctl --user status >/dev/null 2>&1; then
+  if systemd_user_available; then
     systemctl --user is-active "$SERVICE_NAME" >/dev/null 2>&1 && echo "  LiteLLM:    ${GREEN}active${RESET}" || echo "  LiteLLM:    ${RED}inactive${RESET}"
   else
     echo "  LiteLLM:    ${YELLOW}systemd-user unavailable${RESET}"
   fi
   echo
-  echo "${BOLD}Network${RESET}"
-  host_ips | sed 's/^/  Host IP:   /'
-  echo "  Ollama:     http://HOST_IP:$OLLAMA_PORT"
-  echo "  LiteLLM:    http://HOST_IP:$LITELLM_PORT"
-  echo
   curl -fsS "http://127.0.0.1:$OLLAMA_PORT/api/tags" >/dev/null 2>&1 && log OK "Ollama HTTP healthy" || log WARN "Ollama HTTP not responding"
   curl -fsS -H "Authorization: Bearer $LITELLM_KEY" "http://127.0.0.1:$LITELLM_PORT/v1/models" >/dev/null 2>&1 && log OK "LiteLLM HTTP healthy" || log WARN "LiteLLM HTTP not responding"
-  echo
 }
 
 print_env() {
+  [[ -f "$SCAN_ENV" ]] && set -a && source "$SCAN_ENV" && set +a || true
+  HOST_PRIMARY_IP="$(primary_ip)"
   write_exports
   cat "$HOST_EXPORT"
 }
 
+print_mac_env() {
+  print_env
+  echo
+  echo "# Copy one of these to the macOS VM:"
+  echo "#   scp '$MAC_PRECONFIG' user@mac-vm:~/macos-host-preconfig.env"
+  echo "#   HOST_CONFIG_PATH=~/macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh install"
+}
+
 show_logs() {
   echo "${BOLD}Recent Ollama logs${RESET}"
-  journalctl -u ollama -n 80 --no-pager 2>/dev/null || tail -n 80 "$LOG_DIR/ollama-serve.log" 2>/dev/null || true
+  journalctl -u ollama -n 100 --no-pager 2>/dev/null || tail -n 100 "$LOG_DIR/ollama-serve.log" 2>/dev/null || true
   echo
   echo "${BOLD}Recent LiteLLM logs${RESET}"
-  journalctl --user -u "$SERVICE_NAME" -n 120 --no-pager 2>/dev/null || tail -n 120 "$LOG_DIR/litellm.log" 2>/dev/null || true
+  journalctl --user -u "$SERVICE_NAME" -n 160 --no-pager 2>/dev/null || tail -n 160 "$LOG_DIR/litellm.log" 2>/dev/null || true
 }
 
 restart_stack() {
   step "Restart stack"
-  if systemctl list-unit-files 2>/dev/null | grep -q '^ollama.service'; then
+  if systemd_available && systemctl list-unit-files 2>/dev/null | grep -q '^ollama.service'; then
     require_sudo
     run sudo systemctl restart ollama
   fi
-  if systemctl --user status >/dev/null 2>&1; then
+  if systemd_user_available; then
     run systemctl --user restart "$SERVICE_NAME" || true
   fi
   probe
@@ -547,7 +809,7 @@ restart_stack() {
 
 stop_stack() {
   step "Stop LiteLLM"
-  if systemctl --user status >/dev/null 2>&1; then
+  if systemd_user_available; then
     run systemctl --user stop "$SERVICE_NAME" || true
   fi
   pkill -f "litellm --config $LITELLM_CONFIG" || true
@@ -557,54 +819,56 @@ stop_stack() {
 uninstall_stack() {
   step "Uninstall LiteLLM stack files"
   stop_stack
-  if systemctl --user status >/dev/null 2>&1; then
+  if systemd_user_available; then
     systemctl --user disable "$SERVICE_NAME" || true
     rm -f "$HOME/.config/systemd/user/$SERVICE_NAME"
     systemctl --user daemon-reload || true
   fi
-  rm -rf "$VENV_DIR" "$CONFIG_DIR" "$STATUS_JSON"
+  rm -rf "$VENV_DIR" "$LITELLM_CONFIG" "$STATUS_JSON"
   log OK "Removed LiteLLM venv/config/status. Ollama and models kept."
 }
 
 summary() {
-  write_exports
+  preconfigure_macos_files
   local elapsed="$(( $(date +%s) - START_TS ))"
   echo
   echo "${GREEN}${BOLD}╔══════════════════════════════════════════════════════════════════════════════╗${RESET}"
   echo "${GREEN}${BOLD}║                              HOST STACK READY                               ║${RESET}"
   echo "${GREEN}${BOLD}╚══════════════════════════════════════════════════════════════════════════════╝${RESET}"
   echo
-  echo "  Model alias:       $MODEL_ALIAS"
-  echo "  Model source:      $MODEL_SOURCE"
-  echo "  Context:           $NUM_CTX"
-  echo "  Ollama port:       $OLLAMA_PORT"
-  echo "  LiteLLM port:      $LITELLM_PORT"
-  echo "  Export file:       $HOST_EXPORT"
-  echo "  Status JSON:       $STATUS_JSON"
-  echo "  Log file:          $LOG_FILE"
-  echo "  Elapsed:           ${elapsed}s"
+  kv "Model alias" "$MODEL_ALIAS"
+  kv "Model source" "$MODEL_SOURCE"
+  kv "Context" "$NUM_CTX"
+  kv "GPU" "$GPU_NAME / ${GPU_VRAM_MB} MB"
+  kv "Primary IP" "$HOST_PRIMARY_IP"
+  kv "LiteLLM" "http://$HOST_PRIMARY_IP:$LITELLM_PORT"
+  kv "Ollama" "http://$HOST_PRIMARY_IP:$OLLAMA_PORT"
+  kv "macOS env" "$MAC_PRECONFIG"
+  kv "Bootstrap" "$MAC_BOOTSTRAP"
+  kv "Status JSON" "$STATUS_JSON"
+  kv "Log" "$LOG_FILE"
+  kv "Elapsed" "${elapsed}s"
   echo
-  echo "${CYAN}${BOLD}Detected host IPs${RESET}"
-  host_ips | sed 's/^/  - /'
+  echo "${CYAN}${BOLD}macOS VM command:${RESET}"
+  echo "  HOST_CONFIG_PATH=$MAC_PRECONFIG ./scripts/macos-vm-claude-client.sh install"
   echo
-  echo "${CYAN}${BOLD}Run this inside the macOS VM, replacing HOST_IP if needed:${RESET}"
-  local ipaddr
-  ipaddr="$(host_ips | head -n 1 || true)"
-  echo "  HOST_IP=${ipaddr:-<ubuntu-host-ip>} ./scripts/macos-vm-claude-client.sh"
-  echo
+  echo "${YELLOW}If the macOS VM cannot see host files, copy $MAC_PRECONFIG into the repo root as macos-host-preconfig.env.${RESET}"
 }
 
 install_stack() {
   banner
-  ascii_topology
   os_guard
+  collect_scan
+  auto_tune_from_scan
+  ascii_topology
   apt_install_base
-  detect_gpu
+  preflight_ports
   install_ollama
   configure_ollama_service
   pull_model
   create_wrapper_model
   install_litellm
+  enable_linger_if_needed
   start_litellm_service
   configure_firewall
   probe
@@ -613,11 +877,14 @@ install_stack() {
 
 case "${1:-install}" in
   install) install_stack ;;
+  scan) print_scan ;;
   status) print_status ;;
   logs) show_logs ;;
   restart) restart_stack ;;
   stop) stop_stack ;;
   env) print_env ;;
+  mac-env) print_mac_env ;;
+  preconfigure) collect_scan; auto_tune_from_scan; preconfigure_macos_files ;;
   uninstall) uninstall_stack ;;
   help|-h|--help) usage ;;
   *) usage; exit 2 ;;

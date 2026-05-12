@@ -20,6 +20,33 @@ Ubuntu host
 
 The macOS VM remains the development workstation. The Ubuntu host does the model work, where NVIDIA/CUDA acceleration is available.
 
+## Hardened v2 scripts
+
+The repository includes hardened v2 scripts alongside the original Ubuntu entrypoint. The macOS compatibility entrypoint now delegates to the v2 script.
+
+```text
+scripts/ubuntu-host-qwen-claude-stack-v2.sh
+scripts/macos-vm-claude-client-v2.sh
+```
+
+The v2 scripts add safer process tracking, stronger `.env` generation, timeout-protected systemd checks, safer uninstall behavior, better offline testing support, and improved shell profile handling.
+
+Use v2 for new installs:
+
+```bash
+# Ubuntu host
+chmod +x scripts/ubuntu-host-qwen-claude-stack-v2.sh
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh install
+```
+
+```bash
+# macOS VM
+chmod +x scripts/macos-vm-claude-client-v2.sh
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh install
+```
+
+The original Ubuntu script is still present for compatibility. The CI workflow validates both original and v2 scripts.
+
 ## Terminal captures
 
 These captures show the actual script flow from a sandboxed scan/status run. They are included so the README previews the terminal UX before you run the installer on the real Ubuntu host.
@@ -53,7 +80,9 @@ The sandbox does not expose your RTX 2070, local LAN, or systemd services, so th
 │       └── terminal-status-topology.svg
 └── scripts
     ├── macos-vm-claude-client.sh
-    └── ubuntu-host-qwen-claude-stack.sh
+    ├── macos-vm-claude-client-v2.sh
+    ├── ubuntu-host-qwen-claude-stack.sh
+    └── ubuntu-host-qwen-claude-stack-v2.sh
 ```
 
 ## Default model and auto-tuning
@@ -84,8 +113,8 @@ Run this on the real host machine, not inside the macOS VM.
 ```bash
 git clone https://github.com/ales27pm/mac-claude-code.git
 cd mac-claude-code
-chmod +x scripts/ubuntu-host-qwen-claude-stack.sh
-./scripts/ubuntu-host-qwen-claude-stack.sh install
+chmod +x scripts/ubuntu-host-qwen-claude-stack-v2.sh
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh install
 ```
 
 The host script now does all of this:
@@ -101,6 +130,7 @@ The host script now does all of this:
 - creates a tuned local wrapper model named `qwen-coder-ablit`
 - installs LiteLLM inside an isolated Python venv
 - creates a user-level LiteLLM systemd service or falls back to `nohup`
+- tracks fallback background process PIDs safely
 - optionally enables user lingering for persistent user services
 - adds UFW rules when UFW is active
 - runs HTTP and generation smoke tests
@@ -109,15 +139,15 @@ The host script now does all of this:
 ### Host commands
 
 ```bash
-./scripts/ubuntu-host-qwen-claude-stack.sh scan
-./scripts/ubuntu-host-qwen-claude-stack.sh status
-./scripts/ubuntu-host-qwen-claude-stack.sh env
-./scripts/ubuntu-host-qwen-claude-stack.sh mac-env
-./scripts/ubuntu-host-qwen-claude-stack.sh preconfigure
-./scripts/ubuntu-host-qwen-claude-stack.sh logs
-./scripts/ubuntu-host-qwen-claude-stack.sh restart
-./scripts/ubuntu-host-qwen-claude-stack.sh stop
-./scripts/ubuntu-host-qwen-claude-stack.sh uninstall
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh scan
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh status
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh env
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh mac-env
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh preconfigure
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh logs
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh restart
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh stop
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh uninstall
 ```
 
 ### Generated host files
@@ -165,7 +195,7 @@ Force higher quality:
 ```bash
 MODEL_SOURCE=dagbs/qwen2.5-coder-7b-instruct-abliterated:q5_k_m \
 NUM_CTX=8192 \
-./scripts/ubuntu-host-qwen-claude-stack.sh install
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh install
 ```
 
 Disable automatic model/context selection:
@@ -174,7 +204,7 @@ Disable automatic model/context selection:
 AUTO_TUNE_MODEL=0 \
 MODEL_SOURCE=dagbs/qwen2.5-coder-7b-instruct-abliterated:q4_k_m \
 NUM_CTX=8192 \
-./scripts/ubuntu-host-qwen-claude-stack.sh install
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh install
 ```
 
 Useful host options:
@@ -192,6 +222,8 @@ SKIP_MODEL_PULL=1
 FORCE_RECREATE_MODEL=1
 FORCE_REINSTALL_LITELLM=1
 STRICT_PORT_CHECK=1
+CONFIRM_UNINSTALL=1
+REMOVE_UFW_RULES_ON_UNINSTALL=1
 ```
 
 ## macOS VM install with host preconfiguration
@@ -201,7 +233,7 @@ Best route: copy the host-generated preconfig file into the macOS VM repo root.
 On Ubuntu host:
 
 ```bash
-./scripts/ubuntu-host-qwen-claude-stack.sh mac-env
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh mac-env
 cp ~/.local/share/mac-claude-code/macos-host-preconfig.env ./macos-host-preconfig.env
 ```
 
@@ -213,8 +245,8 @@ Inside the macOS VM:
 git clone https://github.com/ales27pm/mac-claude-code.git
 cd mac-claude-code
 cp /path/to/macos-host-preconfig.env ./macos-host-preconfig.env
-chmod +x scripts/macos-vm-claude-client.sh
-./scripts/macos-vm-claude-client.sh install
+chmod +x scripts/macos-vm-claude-client-v2.sh
+./scripts/macos-vm-claude-client-v2.sh install
 ```
 
 The macOS script searches for host config in this order:
@@ -232,13 +264,19 @@ The macOS script searches for host config in this order:
 Manual fallback:
 
 ```bash
-HOST_IP=<ubuntu-host-ip> ./scripts/macos-vm-claude-client.sh install
+HOST_IP=<ubuntu-host-ip> ./scripts/macos-vm-claude-client-v2.sh install
 ```
 
 Explicit config file:
 
 ```bash
-HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh install
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh install
+```
+
+Offline testing without host verification:
+
+```bash
+SKIP_PROBE=1 HOST_IP=<ubuntu-host-ip> ./scripts/macos-vm-claude-client-v2.sh install
 ```
 
 The macOS script installs or validates:
@@ -247,7 +285,7 @@ The macOS script installs or validates:
 - Node.js and npm
 - Claude Code CLI
 - host preconfig import and persistence
-- host endpoint verification
+- optional host endpoint verification
 - a project `.env` file using the host LiteLLM endpoint
 - a `claude-local` wrapper that auto-loads `.env`
 - a `qwen-stack-status` terminal health command
@@ -257,12 +295,12 @@ The macOS script installs or validates:
 ### macOS commands
 
 ```bash
-./scripts/macos-vm-claude-client.sh import-host
-./scripts/macos-vm-claude-client.sh status
-./scripts/macos-vm-claude-client.sh doctor
-./scripts/macos-vm-claude-client.sh env
-./scripts/macos-vm-claude-client.sh launch
-./scripts/macos-vm-claude-client.sh uninstall
+./scripts/macos-vm-claude-client-v2.sh import-host
+./scripts/macos-vm-claude-client-v2.sh status
+./scripts/macos-vm-claude-client-v2.sh doctor
+./scripts/macos-vm-claude-client-v2.sh env
+./scripts/macos-vm-claude-client-v2.sh launch
+./scripts/macos-vm-claude-client-v2.sh uninstall
 ```
 
 Once installed:
@@ -309,15 +347,15 @@ This stack is intended for a trusted local LAN or VM bridge.
 On Ubuntu host:
 
 ```bash
-./scripts/ubuntu-host-qwen-claude-stack.sh scan
-./scripts/ubuntu-host-qwen-claude-stack.sh status
-./scripts/ubuntu-host-qwen-claude-stack.sh mac-env
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh scan
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh status
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh mac-env
 ```
 
 Inside macOS VM:
 
 ```bash
-HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh doctor
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh doctor
 curl http://<ubuntu-host-ip>:4000/v1/models -H 'Authorization: Bearer local-dev-key'
 ```
 
@@ -356,18 +394,19 @@ The repository includes a GitHub Actions workflow that runs:
 
 - `bash -n` syntax checks
 - ShellCheck with selected ignores for generated environment-loader patterns
+- both original and v2 stack scripts
 
 ## One-shot run order
 
 ```bash
 # Ubuntu host
-chmod +x scripts/ubuntu-host-qwen-claude-stack.sh
-./scripts/ubuntu-host-qwen-claude-stack.sh install
+chmod +x scripts/ubuntu-host-qwen-claude-stack-v2.sh
+./scripts/ubuntu-host-qwen-claude-stack-v2.sh install
 cp ~/.local/share/mac-claude-code/macos-host-preconfig.env ./macos-host-preconfig.env
 
 # macOS VM
-chmod +x scripts/macos-vm-claude-client.sh
-HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh install
+chmod +x scripts/macos-vm-claude-client-v2.sh
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh install
 qwen-stack-status
 claude-local
 ```

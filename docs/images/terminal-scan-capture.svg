@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="820" viewBox="0 0 1280 820" role="img" aria-label="Terminal capture of Ubuntu host scan mode">
+  <rect width="1280" height="820" rx="24" fill="#07111f"/>
+  <rect x="24" y="24" width="1232" height="772" rx="18" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+  <circle cx="58" cy="56" r="9" fill="#ef4444"/>
+  <circle cx="88" cy="56" r="9" fill="#f59e0b"/>
+  <circle cx="118" cy="56" r="9" fill="#22c55e"/>
+  <text x="640" y="62" text-anchor="middle" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">ubuntu-host-qwen-claude-stack.sh scan</text>
+  <text x="54" y="108" fill="#e5e7eb" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">
+    <tspan x="54" dy="0" fill="#38bdf8">$ ./scripts/ubuntu-host-qwen-claude-stack.sh scan</tspan>
+    <tspan x="54" dy="34" fill="#c084fc">[STEP]</tspan><tspan fill="#e5e7eb"> Deep system scan</tspan>
+    <tspan x="54" dy="34" fill="#f8fafc">System scan</tspan>
+    <tspan x="54" dy="28" fill="#f8fafc">mac-claude-code host scan</tspan>
+    <tspan x="54" dy="28" fill="#94a3b8">generated_at=2026-05-12T04:11:01+00:00</tspan>
+    <tspan x="54" dy="34" fill="#e2e8f0">host:                  11c8401dc864</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">os:                    Debian GNU/Linux 13 (trixie)</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">kernel:                6.12.47</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">arch:                  x86_64</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">cpu:                   AMD EPYC 7763 64-Core Processor</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">cores:                 5</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">ram_gb:                9.9</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">swap_gb:               0.0</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">disk_free_gb:          51</tspan>
+    <tspan x="54" dy="28" fill="#fbbf24">gpu:                   none</tspan>
+    <tspan x="54" dy="28" fill="#fbbf24">gpu_vram_mb:           0</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">default_iface:         eth0</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">gateway:               172.26.44.1</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">primary_ip:            172.26.44.7</tspan>
+    <tspan x="54" dy="34" fill="#22c55e">[OK]</tspan><tspan fill="#e5e7eb"> Scan written: ~/.local/share/mac-claude-code/config/host-scan.env</tspan>
+    <tspan x="54" dy="28" fill="#22c55e">[OK]</tspan><tspan fill="#e5e7eb"> Scan report:  ~/.local/share/mac-claude-code/config/host-scan.txt</tspan>
+    <tspan x="54" dy="34" fill="#c084fc">[STEP]</tspan><tspan fill="#e5e7eb"> Auto tuning</tspan>
+    <tspan x="54" dy="28" fill="#22c55e">[OK]</tspan><tspan fill="#e5e7eb"> Selected model: dagbs/qwen2.5-coder-7b-instruct-abliterated:q3_k_m</tspan>
+    <tspan x="54" dy="28" fill="#22c55e">[OK]</tspan><tspan fill="#e5e7eb"> Selected context: 4096</tspan>
+  </text>
+  <text x="54" y="778" fill="#64748b" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">Capture generated from a sandbox scan run. Real Ubuntu host output will show the detected local CPU, GPU, VRAM and LAN IP.</text>
+</svg>

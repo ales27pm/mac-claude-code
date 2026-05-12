@@ -105,6 +105,20 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 shell_quote() { printf '%q' "$1"; }
 write_env_var() { printf '%s=%s\n' "$1" "$(shell_quote "$2")"; }
 
+json_str() {
+  awk 'BEGIN{RS=""; ORS=""}
+  {
+    gsub(/\\/,"\\\\");
+    gsub(/"/,"\\\"");
+    gsub(/\t/,"\\t");
+    gsub(/\r/,"\\r");
+    gsub(/\n/,"\\n");
+    gsub(/\f/,"\\f");
+    gsub(/\b/,"\\b");
+    printf "%s",$0
+  }' <<<"$1"
+}
+
 cleanup_started_children() {
   local pid
   for pid in "${STARTED_PIDS[@]:-}"; do
@@ -413,7 +427,10 @@ preflight_ports() {
     fi
     rm -f "$tmpfile"
   done
-  [[ "$STRICT_PORT_CHECK" == "1" && "$conflict" == "1" ]] && { log ERR "Port conflict detected and STRICT_PORT_CHECK=1"; exit 1; }
+  if [[ "$STRICT_PORT_CHECK" == "1" && "$conflict" == "1" ]]; then
+    log ERR "Port conflict detected and STRICT_PORT_CHECK=1"
+    exit 1
+  fi
 }
 
 install_ollama() {
@@ -469,9 +486,31 @@ pull_model() {
   wait_for_http "http://127.0.0.1:$OLLAMA_PORT/api/tags" "" 30 1 5
   run ollama pull "$MODEL_SOURCE"
   log OK "Pulled: $MODEL_SOURCE"
+  MODEL_BASE_NAME="$(printf '%s' "$MODEL_SOURCE" | cut -d: -f1)"
 }
 
-model_exists() { ollama list 2>/dev/null | awk '{print $1}' | grep -Fxq "$MODEL_ALIAS"; }
+wait_for_model_ready() {
+  local model="$1" attempts="${MODEL_READY_ATTEMPTS:-20}" delay="${MODEL_READY_DELAY_SEC:-2}" i
+  log INFO "Waiting for model to appear in ollama list: $model"
+  for ((i = 1; i <= attempts; i++)); do
+    if ollama list 2>/dev/null | awk '{print $1}' | cut -d: -f1 | grep -Fxq "$model"; then
+      log OK "Model ready: $model"
+      return 0
+    fi
+    printf "%s" "${DIM}.${RESET}"
+    sleep "$delay"
+  done
+  echo
+  log WARN "Model '$model' not found in ollama list after $((attempts * delay))s; proceeding anyway"
+  return 0
+}
+
+model_exists() {
+  ollama list 2>/dev/null |
+    awk '{print $1}' |
+    cut -d: -f1 |
+    grep -Fxq "$MODEL_ALIAS"
+}
 
 create_wrapper_model() {
   step "Wrapper model"
@@ -629,22 +668,22 @@ health_json() {
   [[ -z "$HOST_PRIMARY_IP" ]] && HOST_PRIMARY_IP="$(primary_ip)"
   cat > "$STATUS_JSON" <<STATUSEOF
 {
-  "status": "$status",
-  "app": "$APP_NAME",
-  "model_alias": "$MODEL_ALIAS",
-  "model_source": "$MODEL_SOURCE",
+  "status": "$(json_str "$status")",
+  "app": "$(json_str "$APP_NAME")",
+  "model_alias": "$(json_str "$MODEL_ALIAS")",
+  "model_source": "$(json_str "$MODEL_SOURCE")",
   "num_ctx": $NUM_CTX,
-  "gpu_name": "$GPU_NAME",
-  "gpu_vram_mb": "$GPU_VRAM_MB",
-  "ram_gb": "$RAM_GB",
-  "host_ip": "$HOST_PRIMARY_IP",
+  "gpu_name": "$(json_str "$GPU_NAME")",
+  "gpu_vram_mb": "$(json_str "$GPU_VRAM_MB")",
+  "ram_gb": "$(json_str "$RAM_GB")",
+  "host_ip": "$(json_str "$HOST_PRIMARY_IP")",
   "ollama_port": $OLLAMA_PORT,
   "litellm_port": $LITELLM_PORT,
-  "litellm_base_url": "http://$HOST_PRIMARY_IP:$LITELLM_PORT",
-  "ollama_base_url": "http://$HOST_PRIMARY_IP:$OLLAMA_PORT",
-  "scan_env": "$SCAN_ENV",
-  "host_export": "$HOST_EXPORT",
-  "log_file": "$LOG_FILE",
+  "litellm_base_url": "http://$(json_str "$HOST_PRIMARY_IP"):$LITELLM_PORT",
+  "ollama_base_url": "http://$(json_str "$HOST_PRIMARY_IP"):$OLLAMA_PORT",
+  "scan_env": "$(json_str "$SCAN_ENV")",
+  "host_export": "$(json_str "$HOST_EXPORT")",
+  "log_file": "$(json_str "$LOG_FILE")",
   "elapsed_seconds": $elapsed,
   "updated_at": "$(date -Iseconds)"
 }
@@ -657,18 +696,35 @@ probe() {
   local ollama_generate_url="http://127.0.0.1:$OLLAMA_PORT/api/generate"
   local litellm_url="http://127.0.0.1:$LITELLM_PORT/v1/models"
   local response=""
+
   wait_for_http "$ollama_tags_url" "" 30 1 5
   log OK "Ollama responds: $ollama_tags_url"
   wait_for_http "$litellm_url" "Authorization: Bearer $LITELLM_KEY" 30 1 5
   log OK "LiteLLM responds: $litellm_url"
+
   log INFO "Generation smoke test"
-  if command_exists jq; then
-    response="$(curl -fsS "$ollama_generate_url" -H "Content-Type: application/json" -d "{\"model\":\"$MODEL_ALIAS\",\"prompt\":\"Return exactly LOCAL_QWEN_READY and nothing else.\",\"stream\":false}" | jq -r '.response' || true)"
-  else
-    response="$(curl -fsS "$ollama_generate_url" -H "Content-Type: application/json" -d "{\"model\":\"$MODEL_ALIAS\",\"prompt\":\"Return exactly LOCAL_QWEN_READY and nothing else.\",\"stream\":false}" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("response", ""))' 2>/dev/null || true)"
+  local raw_json=""
+  raw_json="$(curl -fsS "$ollama_generate_url"     -H "Content-Type: application/json"     -d "{\"model\":\"$MODEL_ALIAS\",\"prompt\":\"Return exactly LOCAL_QWEN_READY and nothing else.\",\"stream\":false}" || true)"
+
+  if [[ -n "$raw_json" ]]; then
+    if command_exists jq; then
+      response="$(printf '%s' "$raw_json" | jq -r '.response // empty' 2>/dev/null || true)"
+    else
+      # Fallback parser for simple unescaped JSON response values only.
+      response="$(printf '%s' "$raw_json" | awk -F'"response"[[:space:]]*:[[:space:]]*"' 'NF>1{split($2,a,"\""); print a[1]; exit}' || true)"
+    fi
   fi
-  echo "${DIM}${response}${RESET}"
-  health_json "ready"
+
+  local health_state="ready"
+  if [[ -n "$response" ]]; then
+    echo "${DIM}${response}${RESET}"
+    log OK "Smoke test passed"
+  else
+    log WARN "Smoke test returned empty response; model may still be loading"
+    health_state="degraded"
+  fi
+
+  health_json "$health_state"
 }
 
 print_scan() { banner; collect_scan; auto_tune_from_scan; }
@@ -735,7 +791,7 @@ summary() {
   echo; echo "${CYAN}${BOLD}macOS VM command:${RESET}"; echo "  HOST_CONFIG_PATH=$MAC_PRECONFIG ./scripts/macos-vm-claude-client-v2.sh install"; echo
 }
 
-install_stack() { banner; os_guard; collect_scan; auto_tune_from_scan; ascii_topology; apt_install_base; preflight_ports; install_ollama; configure_ollama_service; pull_model; create_wrapper_model; install_litellm; enable_linger_if_needed; start_litellm_service; configure_firewall; probe; summary; }
+install_stack() { banner; os_guard; collect_scan; auto_tune_from_scan; ascii_topology; apt_install_base; preflight_ports; install_ollama; configure_ollama_service; pull_model; wait_for_model_ready "${MODEL_BASE_NAME:-$MODEL_ALIAS}"; create_wrapper_model; install_litellm; enable_linger_if_needed; start_litellm_service; configure_firewall; probe; summary; }
 
 case "${1:-install}" in
   install) install_stack ;;

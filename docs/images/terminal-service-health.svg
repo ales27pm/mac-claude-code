@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-label="Terminal capture of service health summary">
+  <rect width="1280" height="760" rx="24" fill="#07111f"/>
+  <rect x="24" y="24" width="1232" height="712" rx="18" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+  <circle cx="58" cy="56" r="9" fill="#ef4444"/>
+  <circle cx="88" cy="56" r="9" fill="#f59e0b"/>
+  <circle cx="118" cy="56" r="9" fill="#22c55e"/>
+  <text x="640" y="62" text-anchor="middle" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">status: scan summary + service health</text>
+  <text x="54" y="110" fill="#e5e7eb" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">
+    <tspan x="54" dy="0" fill="#f8fafc">Scan summary</tspan>
+    <tspan x="54" dy="34" fill="#e2e8f0">CPU:                   unknown</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">Cores:                 5</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">RAM GB:                9.9</tspan>
+    <tspan x="54" dy="28" fill="#fbbf24">GPU:                   none</tspan>
+    <tspan x="54" dy="28" fill="#fbbf24">VRAM MB:               0</tspan>
+    <tspan x="54" dy="28" fill="#e2e8f0">Primary IP:            172.26.44.7</tspan>
+    <tspan x="54" dy="42" fill="#f8fafc">Services</tspan>
+    <tspan x="54" dy="34" fill="#fbbf24">  Ollama:              no system service detected</tspan>
+    <tspan x="54" dy="28" fill="#fbbf24">  LiteLLM:             systemd-user unavailable</tspan>
+    <tspan x="54" dy="42" fill="#fbbf24">[WARN]</tspan><tspan fill="#e5e7eb"> Ollama HTTP not responding</tspan>
+    <tspan x="54" dy="28" fill="#fbbf24">[WARN]</tspan><tspan fill="#e5e7eb"> LiteLLM HTTP not responding</tspan>
+    <tspan x="54" dy="48" fill="#94a3b8">This is expected in scan/status-only sandbox runs where Ollama and LiteLLM are not installed or started.</tspan>
+    <tspan x="54" dy="34" fill="#94a3b8">On the real Ubuntu host, run the full install command to enable the services and smoke tests.</tspan>
+    <tspan x="54" dy="48" fill="#38bdf8">$ ./scripts/ubuntu-host-qwen-claude-stack.sh install</tspan>
+    <tspan x="54" dy="34" fill="#38bdf8">$ ./scripts/ubuntu-host-qwen-claude-stack.sh status</tspan>
+  </text>
+</svg>

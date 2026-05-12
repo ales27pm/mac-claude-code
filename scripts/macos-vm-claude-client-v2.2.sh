@@ -15,6 +15,8 @@
 #   - BSD/macOS mktemp compatibility: template ends with XXXXXX, no suffix
 #   - profiles_to_update always returns 0 when profiles exist, avoiding ERR trap
 #     pollution inside process substitution during PATH setup
+#   - claude-local injects npm/Homebrew/global binary paths before exec so a
+#     newly installed Claude Code CLI is found without opening a new shell
 
 set -Eeuo pipefail
 
@@ -121,6 +123,49 @@ if old_profiles_tail in text:
     text = text.replace(old_profiles_tail, new_profiles_tail, 1)
 elif "profiles_to_update()" in text and "return 0" not in text[text.index("profiles_to_update()"):text.index("ensure_profile_line()")]:
     raise SystemExit("Could not patch profiles_to_update")
+
+old_claude_local = '''cat > "$BIN_DIR/claude-local" <<'CLAUDELOCAL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+if [[ -f ".env" ]]; then
+  set -a
+  if ! source ".env"; then
+    echo "Error: failed to source .env" >&2
+    exit 1
+  fi
+  set +a
+fi
+exec claude "$@"
+CLAUDELOCAL'''
+new_claude_local = '''cat > "$BIN_DIR/claude-local" <<'CLAUDELOCAL'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export PATH="$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
+
+if [[ -f ".env" ]]; then
+  set -a
+  if ! source ".env"; then
+    echo "Error: failed to source .env" >&2
+    exit 1
+  fi
+  set +a
+fi
+
+CLAUDE_BIN="$(command -v claude || true)"
+if [[ -z "$CLAUDE_BIN" ]]; then
+  echo "Error: claude not found." >&2
+  echo "Expected Claude Code in ~/.npm-global/bin, /opt/homebrew/bin, /usr/local/bin, or PATH." >&2
+  echo "Try: export PATH=\"$HOME/.npm-global/bin:$HOME/.local/bin:$PATH\"" >&2
+  exit 127
+fi
+
+exec "$CLAUDE_BIN" "$@"
+CLAUDELOCAL'''
+if old_claude_local in text:
+    text = text.replace(old_claude_local, new_claude_local, 1)
+elif "CLAUDE_BIN=" not in text:
+    raise SystemExit("Could not patch claude-local wrapper")
 
 patched_path.write_text(text, encoding="utf-8")
 PY

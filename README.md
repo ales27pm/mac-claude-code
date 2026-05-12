@@ -1,5 +1,90 @@
 # mac-claude-code
 
+```text
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                                      ┃
+┃  ███╗   ███╗ █████╗  ██████╗      ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗  ┃
+┃  ████╗ ████║██╔══██╗██╔════╝     ██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝  ┃
+┃  ██╔████╔██║███████║██║          ██║     ██║     ███████║██║   ██║██║  ██║█████╗    ┃
+┃  ██║╚██╔╝██║██╔══██║██║          ██║     ██╔══██╗██╔══██║██║   ██║██║  ██║██╔══╝    ┃
+┃  ██║ ╚═╝ ██║██║  ██║╚██████╗     ╚██████╗███████║██║  ██║╚██████╔╝██████╔╝███████╗  ┃
+┃  ╚═╝     ╚═╝╚═╝  ╚═╝ ╚═════╝      ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝  ┃
+┃                                                                                      ┃
+┃       LOCAL CLAUDE CODE STACK FOR A macOS VM                                         ┃
+┃       Ubuntu Host · Ollama · LiteLLM · Qwen Coder Abliterated                        ┃
+┃                                                                                      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+        .-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''-.
+       /  WALL #11434 + #4000                                                 \
+      /  "THE CLOUD WAS JUST SOMEONE ELSE'S COMPUTER WITH BETTER MARKETING"    \
+     /__________________________________________________________________________\
+     |                                                                          |
+     |       ┌─────────────────────┐                                            |
+     |       │      macOS VM        │                                            |
+     |       │ VS Code / Claude     │                                            |
+     |       │ claude-local .env    │                                            |
+     |       └──────────┬──────────┘                                            |
+     |                  │                                                       |
+     |                  │  ANTHROPIC_BASE_URL                                   |
+     |                  │  ANTHROPIC_API_KEY                                    |
+     |                  │  ANTHROPIC_MODEL                                      |
+     |                  ▼                                                       |
+     |       ┌─────────────────────┐        ┌─────────────────────┐             |
+     |       │   LiteLLM Proxy      │◄───────│ host-connection.env │             |
+     |       │   :4000              │        │ macOS preconfig     │             |
+     |       │   OpenAI-ish API     │        └─────────────────────┘             |
+     |       └──────────┬──────────┘                                            |
+     |                  │                                                       |
+     |                  ▼                                                       |
+     |       ┌─────────────────────┐                                            |
+     |       │      Ollama          │        NO API RENT.                        |
+     |       │      :11434          │        NO CLOUD PRIEST.                    |
+     |       │  qwen-coder-ablit    │        NO TOKEN TAX.                       |
+     |       └──────────┬──────────┘                                            |
+     |                  │                                                       |
+     |                  ▼                                                       |
+     |       ┌─────────────────────┐                                            |
+     |       │   NVIDIA / CUDA      │                                            |
+     |       │   local inference    │                                            |
+     |       │   host-side muscle   │                                            |
+     |       └─────────────────────┘                                            |
+     |                                                                          |
+     |             ____                                                         |
+     |        _.-'`    `'-._             ┌───────────────┐                      |
+     |      .'   .--.       '.           │ SYSTEM SCAN   │                      |
+     |     /    /    \        \          │ CPU / RAM     │                      |
+     |    ;    |  ()  |        ;         │ GPU / VRAM    │                      |
+     |    |     \    /         |         │ CUDA / LAN IP │                      |
+     |    ;      '--'      _   ;         │ UFW / PORTS   │                      |
+     |     \             (o)  /          └───────┬───────┘                      |
+     |      '.              .'                   │                              |
+     |        '-._      _.-'                     ▼                              |
+     |            `''''`                  ┌───────────────┐                      |
+     |                                    │ AUTO TUNER    │                      |
+     |        [ CCTV watching             │ q5 ≥ 11 GB    │                      |
+     |          a local model             │ q4 ≥  7 GB    │                      |
+     |          become self-employed ]    │ iq ≥  5 GB    │                      |
+     |                                    │ q3 fallback   │                      |
+     |                                    └───────────────┘                      |
+     |                                                                          |
+     |   (\_/)                                                                  |
+     |   ( •_•)    rat@wall:~$ curl localhost:4000/v1/models                    |
+     |  / > spray                                                               |
+     |                                                                          |
+     |   ──────────────────────────────────────────────────────────────────     |
+     |   STENCIL NOTES                                                          |
+     |   • macOS stays light                                                    |
+     |   • Ubuntu does the heavy lifting                                         |
+     |   • LiteLLM speaks the dialect                                           |
+     |   • Ollama hides the engine                                              |
+     |   • Qwen writes the code                                                 |
+     |   • CUDA burns the incense                                               |
+     |   ──────────────────────────────────────────────────────────────────     |
+     |                                                                          |
+     '--------------------------------------------------------------------------'
+```
+
 Local Claude Code stack for a macOS VM backed by an Ubuntu host running Ollama, Qwen2.5 Coder abliterated, and a LiteLLM proxy.
 
 The design is deliberately split:
@@ -22,13 +107,14 @@ The macOS VM remains the development workstation. The Ubuntu host does the model
 
 ## Hardened scripts
 
-The active Ubuntu host entrypoint now routes through v2.2. The v2.2 wrapper preserves the full v2.1 implementation and applies the final model detection fix for Ollama `name:tag` output.
+The active Ubuntu host entrypoint now routes through v3. The v3 wrapper preserves the full v2.1 implementation and applies the final model detection and status JSON fixes before execution.
 
 ```text
-scripts/ubuntu-host-qwen-claude-stack.sh        → scripts/ubuntu-host-qwen-claude-stack-v2.2.sh
-scripts/ubuntu-host-qwen-claude-stack-v2.sh     → scripts/ubuntu-host-qwen-claude-stack-v2.2.sh
-scripts/ubuntu-host-qwen-claude-stack-v2.2.sh   → patches/runs scripts/ubuntu-host-qwen-claude-stack-v2.1.sh
-scripts/macos-vm-claude-client.sh               → scripts/macos-vm-claude-client-v2.sh
+scripts/ubuntu-host-qwen-claude-stack.sh        → scripts/ubuntu-host-qwen-claude-stack-v3.sh
+scripts/ubuntu-host-qwen-claude-stack-v2.sh     → scripts/ubuntu-host-qwen-claude-stack-v3.sh
+scripts/ubuntu-host-qwen-claude-stack-v3.sh     → patches/runs scripts/ubuntu-host-qwen-claude-stack-v2.1.sh
+scripts/macos-vm-claude-client.sh               → scripts/macos-vm-claude-client-v2.2.sh
+scripts/macos-vm-claude-client-v2.2.sh           → patches/runs scripts/macos-vm-claude-client-v2.sh
 ```
 
 Use the compatibility entrypoint for normal host installs:
@@ -42,18 +128,18 @@ chmod +x scripts/ubuntu-host-qwen-claude-stack.sh
 Or call the active wrapper directly:
 
 ```bash
-chmod +x scripts/ubuntu-host-qwen-claude-stack-v2.2.sh
-./scripts/ubuntu-host-qwen-claude-stack-v2.2.sh install
+chmod +x scripts/ubuntu-host-qwen-claude-stack-v3.sh
+./scripts/ubuntu-host-qwen-claude-stack-v3.sh install
 ```
 
 For the macOS VM:
 
 ```bash
-chmod +x scripts/macos-vm-claude-client-v2.sh
-HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh install
+chmod +x scripts/macos-vm-claude-client.sh
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh install
 ```
 
-The hardened scripts add process tracking, PID-file cleanup, exponential network backoff, stronger `.env` generation, timeout-protected systemd checks, safer uninstall behavior, offline testing support, and improved shell profile handling.
+The hardened scripts add process tracking, PID-file cleanup, exponential network backoff, stronger `.env` generation, timeout-protected systemd checks, safer uninstall behavior, offline testing support, improved shell profile handling, and the stencil-wall terminal banners.
 
 ### Final hardening fixes
 
@@ -63,6 +149,8 @@ The latest patch set includes:
 - macOS status JSON escapes backslashes and double quotes before writing JSON.
 - macOS optional Ollama launcher uses `ollama run "$MODEL_ALIAS"` instead of the invalid `ollama launch` flow.
 - Ubuntu model detection handles Ollama `name:tag` output by stripping tags before comparing model aliases.
+- Ubuntu status JSON escapes string fields before writing `status.json`.
+- README and script banners now use the richer stencil-wall terminal art.
 
 ## Terminal captures
 
@@ -98,10 +186,12 @@ The sandbox does not expose your RTX 2070, local LAN, or systemd services, so th
 └── scripts
     ├── macos-vm-claude-client.sh
     ├── macos-vm-claude-client-v2.sh
+    ├── macos-vm-claude-client-v2.2.sh
     ├── ubuntu-host-qwen-claude-stack.sh
     ├── ubuntu-host-qwen-claude-stack-v2.sh
     ├── ubuntu-host-qwen-claude-stack-v2.1.sh
-    └── ubuntu-host-qwen-claude-stack-v2.2.sh
+    ├── ubuntu-host-qwen-claude-stack-v2.2.sh
+    └── ubuntu-host-qwen-claude-stack-v3.sh
 ```
 
 ## Default model and auto-tuning
@@ -139,7 +229,7 @@ chmod +x scripts/ubuntu-host-qwen-claude-stack.sh
 Direct active wrapper:
 
 ```bash
-./scripts/ubuntu-host-qwen-claude-stack-v2.2.sh install
+./scripts/ubuntu-host-qwen-claude-stack-v3.sh install
 ```
 
 The host script does all of this:
@@ -270,8 +360,8 @@ Inside the macOS VM:
 git clone https://github.com/ales27pm/mac-claude-code.git
 cd mac-claude-code
 cp /path/to/macos-host-preconfig.env ./macos-host-preconfig.env
-chmod +x scripts/macos-vm-claude-client-v2.sh
-./scripts/macos-vm-claude-client-v2.sh install
+chmod +x scripts/macos-vm-claude-client.sh
+./scripts/macos-vm-claude-client.sh install
 ```
 
 The macOS script searches for host config in this order:
@@ -289,19 +379,19 @@ The macOS script searches for host config in this order:
 Manual fallback:
 
 ```bash
-HOST_IP=<ubuntu-host-ip> ./scripts/macos-vm-claude-client-v2.sh install
+HOST_IP=<ubuntu-host-ip> ./scripts/macos-vm-claude-client.sh install
 ```
 
 Explicit config file:
 
 ```bash
-HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh install
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh install
 ```
 
 Offline testing without host verification:
 
 ```bash
-SKIP_PROBE=1 HOST_IP=<ubuntu-host-ip> ./scripts/macos-vm-claude-client-v2.sh install
+SKIP_PROBE=1 HOST_IP=<ubuntu-host-ip> ./scripts/macos-vm-claude-client.sh install
 ```
 
 The macOS script installs or validates:
@@ -322,12 +412,12 @@ The macOS script installs or validates:
 ### macOS commands
 
 ```bash
-./scripts/macos-vm-claude-client-v2.sh import-host
-./scripts/macos-vm-claude-client-v2.sh status
-./scripts/macos-vm-claude-client-v2.sh doctor
-./scripts/macos-vm-claude-client-v2.sh env
-./scripts/macos-vm-claude-client-v2.sh launch
-./scripts/macos-vm-claude-client-v2.sh uninstall
+./scripts/macos-vm-claude-client.sh import-host
+./scripts/macos-vm-claude-client.sh status
+./scripts/macos-vm-claude-client.sh doctor
+./scripts/macos-vm-claude-client.sh env
+./scripts/macos-vm-claude-client.sh launch
+./scripts/macos-vm-claude-client.sh uninstall
 ```
 
 Once installed:
@@ -382,7 +472,7 @@ On Ubuntu host:
 Inside macOS VM:
 
 ```bash
-HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh doctor
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh doctor
 curl http://<ubuntu-host-ip>:4000/v1/models -H 'Authorization: Bearer local-dev-key'
 ```
 
@@ -432,8 +522,8 @@ chmod +x scripts/ubuntu-host-qwen-claude-stack.sh
 cp ~/.local/share/mac-claude-code/macos-host-preconfig.env ./macos-host-preconfig.env
 
 # macOS VM
-chmod +x scripts/macos-vm-claude-client-v2.sh
-HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client-v2.sh install
+chmod +x scripts/macos-vm-claude-client.sh
+HOST_CONFIG_PATH=./macos-host-preconfig.env ./scripts/macos-vm-claude-client.sh install
 qwen-stack-status
 claude-local
 ```

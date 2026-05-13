@@ -3,10 +3,10 @@
 #
 # Configure the official Claude Code VS Code panel to use the local stack.
 #
-# Default mode is OLLAMA_NATIVE because Claude Code expects the Anthropic
-# Messages API and Ollama exposes an Anthropic-compatible /v1/messages endpoint.
-# LiteLLM remains useful for OpenAI-compatible clients, but routing Claude Code's
-# panel through LiteLLM can degrade tool_use into plain JSON text.
+# The preferred backend for Claude Code is Ollama's native Anthropic-compatible
+# /v1/messages endpoint. Claude Code's panel expects Anthropic Messages API
+# semantics for tool_use/tool_result. LiteLLM remains useful for OpenAI-style
+# clients, but the Claude panel should avoid the OpenAI chat-completions path.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -19,6 +19,9 @@ VSCODE_SETTINGS_PATH="${VSCODE_SETTINGS_PATH:-$WORKSPACE_DIR/.vscode/settings.js
 CLAUDE_BACKEND="${CLAUDE_BACKEND:-ollama}" # ollama | litellm
 ENABLE_TOOL_SEARCH_VALUE="${ENABLE_TOOL_SEARCH_VALUE:-false}"
 MAX_MCP_OUTPUT_TOKENS="${MAX_MCP_OUTPUT_TOKENS:-50000}"
+CLAUDE_DISABLE_NONESSENTIAL_TRAFFIC="${CLAUDE_DISABLE_NONESSENTIAL_TRAFFIC:-1}"
+CLAUDE_ATTRIBUTION_HEADER="${CLAUDE_ATTRIBUTION_HEADER:-0}"
+API_TIMEOUT_MS="${API_TIMEOUT_MS:-600000}"
 
 log() { printf '[%s] %s\n' "$1" "$2"; }
 
@@ -57,6 +60,14 @@ MODEL_ALIAS="${MODEL_ALIAS:-qwen-coder-ablit}"
 OLLAMA_HOST_URL="${OLLAMA_HOST_URL:-http://$HOST_IP:$OLLAMA_PORT}"
 LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://$HOST_IP:$LITELLM_PORT}"
 
+case "$MODEL_ALIAS" in
+  */*)
+    echo "MODEL_ALIAS must not contain '/'. Claude Code rejects slash-qualified model names: $MODEL_ALIAS" >&2
+    echo "Create an Ollama alias first, for example: ollama cp 'source/model:tag' qwen_coder_local" >&2
+    exit 2
+    ;;
+esac
+
 case "$CLAUDE_BACKEND" in
   ollama)
     CLAUDE_BASE_URL="$OLLAMA_HOST_URL"
@@ -74,9 +85,14 @@ case "$CLAUDE_BACKEND" in
     ;;
 esac
 
+# Claude Code expects the root endpoint. Do not include /v1 or /v1/messages.
+CLAUDE_BASE_URL="${CLAUDE_BASE_URL%/}"
+CLAUDE_BASE_URL="${CLAUDE_BASE_URL%/v1/messages}"
+CLAUDE_BASE_URL="${CLAUDE_BASE_URL%/v1}"
+
 mkdir -p "$(dirname "$CLAUDE_SETTINGS_PATH")" "$(dirname "$VSCODE_SETTINGS_PATH")"
 
-python3 - "$CLAUDE_SETTINGS_PATH" "$VSCODE_SETTINGS_PATH" "$CLAUDE_AUTH_TOKEN" "$CLAUDE_API_KEY" "$CLAUDE_BASE_URL" "$MODEL_ALIAS" "$ENABLE_TOOL_SEARCH_VALUE" "$MAX_MCP_OUTPUT_TOKENS" "$CLAUDE_BACKEND" <<'PY'
+python3 - "$CLAUDE_SETTINGS_PATH" "$VSCODE_SETTINGS_PATH" "$CLAUDE_AUTH_TOKEN" "$CLAUDE_API_KEY" "$CLAUDE_BASE_URL" "$MODEL_ALIAS" "$ENABLE_TOOL_SEARCH_VALUE" "$MAX_MCP_OUTPUT_TOKENS" "$CLAUDE_BACKEND" "$CLAUDE_DISABLE_NONESSENTIAL_TRAFFIC" "$CLAUDE_ATTRIBUTION_HEADER" "$API_TIMEOUT_MS" <<'PY'
 from __future__ import annotations
 
 import json
@@ -93,6 +109,9 @@ model = sys.argv[6]
 enable_tool_search = sys.argv[7]
 max_mcp_output_tokens = sys.argv[8]
 backend = sys.argv[9]
+disable_nonessential = sys.argv[10]
+attribution_header = sys.argv[11]
+api_timeout_ms = sys.argv[12]
 
 
 def load_json(path: pathlib.Path) -> dict[str, Any]:
@@ -109,24 +128,28 @@ def load_json(path: pathlib.Path) -> dict[str, Any]:
     return data
 
 claude = load_json(claude_path)
+claude["model"] = "sonnet"
 claude_env = claude.get("env")
 if not isinstance(claude_env, dict):
     claude_env = {}
 
-# Claude Code understands ANTHROPIC_BASE_URL. For Ollama native mode, Ollama's
-# Anthropic compatibility docs use ANTHROPIC_AUTH_TOKEN=ollama and do not need
-# ANTHROPIC_API_KEY. Removing ANTHROPIC_API_KEY avoids forcing the X-Api-Key
-# path and reduces login/API-key ambiguity in the VS Code panel.
+# Ollama native mode uses ANTHROPIC_AUTH_TOKEN=ollama. Keep ANTHROPIC_API_KEY
+# absent in that mode so Claude Code does not prefer the wrong auth pathway.
 claude_env.pop("ANTHROPIC_API_KEY", None)
 claude_env.update(
     {
         "ANTHROPIC_AUTH_TOKEN": auth_token,
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_MODEL": model,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
         "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": disable_nonessential,
+        "CLAUDE_CODE_ATTRIBUTION_HEADER": attribution_header,
         "ENABLE_TOOL_SEARCH": enable_tool_search,
         "MAX_MCP_OUTPUT_TOKENS": max_mcp_output_tokens,
-        "API_TIMEOUT_MS": "600000",
+        "API_TIMEOUT_MS": api_timeout_ms,
         "MAC_CLAUDE_CODE_BACKEND": backend,
     }
 )
@@ -150,10 +173,13 @@ PY
 
 log OK "Loaded host config: $CONFIG_FILE"
 log OK "Backend: $CLAUDE_BACKEND"
-log OK "Claude Anthropic base URL: $CLAUDE_BASE_URL"
-log OK "Model: $MODEL_ALIAS"
+log OK "Claude Anthropic root URL: $CLAUDE_BASE_URL"
+log OK "Model slot alias: $MODEL_ALIAS"
 log OK "Wrote Claude settings: $CLAUDE_SETTINGS_PATH"
 log OK "Wrote VS Code settings: $VSCODE_SETTINGS_PATH"
+log OK "Mapped Haiku/Sonnet/Opus to $MODEL_ALIAS"
+log OK "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=$CLAUDE_DISABLE_NONESSENTIAL_TRAFFIC"
+log OK "CLAUDE_CODE_ATTRIBUTION_HEADER=$CLAUDE_ATTRIBUTION_HEADER"
 log OK "ENABLE_TOOL_SEARCH=$ENABLE_TOOL_SEARCH_VALUE"
 log OK "MAX_MCP_OUTPUT_TOKENS=$MAX_MCP_OUTPUT_TOKENS"
 log INFO "Reload VS Code: Cmd+Shift+P → Developer: Reload Window"

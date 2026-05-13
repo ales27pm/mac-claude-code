@@ -1,0 +1,64 @@
+{
+  "name": "mac-claude-code-local-agent",
+  "displayName": "Local Qwen Agent",
+  "description": "Local VS Code chat panel backed by LiteLLM/Ollama with real workspace tools.",
+  "version": "0.1.0",
+  "publisher": "ales27pm",
+  "private": true,
+  "engines": {
+    "vscode": "^1.92.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:localQwenAgent.openPanel"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "localQwenAgent.openPanel",
+        "title": "Local Qwen Agent: Open Panel"
+      }
+    ],
+    "configuration": {
+      "title": "Local Qwen Agent",
+      "properties": {
+        "localQwenAgent.baseUrl": {
+          "type": "string",
+          "default": "http://10.0.0.154:4000",
+          "description": "LiteLLM/OpenAI-compatible base URL."
+        },
+        "localQwenAgent.apiKey": {
+          "type": "string",
+          "default": "local-dev-key",
+          "description": "LiteLLM API key."
+        },
+        "localQwenAgent.model": {
+          "type": "string",
+          "default": "qwen-coder-ablit",
+          "description": "Local model alias."
+        },
+        "localQwenAgent.maxToolRounds": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 30,
+          "description": "Maximum tool execution rounds per user request."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npm run compile && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "@types/vscode": "^1.92.0",
+    "@vscode/vsce": "^3.2.1",
+    "typescript": "^5.7.3"
+  }
+}

@@ -5,6 +5,11 @@
 # This writes:
 #   - ~/.claude/settings.json for Claude Code env shared by CLI and extension
 #   - .vscode/settings.json for VS Code panel behavior
+#
+# Important for local/non-first-party ANTHROPIC_BASE_URL:
+#   ENABLE_TOOL_SEARCH=false forces Claude Code to load tools upfront instead of
+#   relying on deferred tool_reference discovery blocks that most proxies/local
+#   models do not handle correctly.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -14,6 +19,8 @@ HOST_CONFIG_PATH="${HOST_CONFIG_PATH:-}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-$(pwd)}"
 CLAUDE_SETTINGS_PATH="${CLAUDE_SETTINGS_PATH:-$HOME/.claude/settings.json}"
 VSCODE_SETTINGS_PATH="${VSCODE_SETTINGS_PATH:-$WORKSPACE_DIR/.vscode/settings.json}"
+ENABLE_TOOL_SEARCH_VALUE="${ENABLE_TOOL_SEARCH_VALUE:-false}"
+MAX_MCP_OUTPUT_TOKENS="${MAX_MCP_OUTPUT_TOKENS:-50000}"
 
 log() { printf '[%s] %s\n' "$1" "$2"; }
 
@@ -52,7 +59,7 @@ LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://$HOST_IP:$LITELLM_PORT}"
 
 mkdir -p "$(dirname "$CLAUDE_SETTINGS_PATH")" "$(dirname "$VSCODE_SETTINGS_PATH")"
 
-python3 - "$CLAUDE_SETTINGS_PATH" "$VSCODE_SETTINGS_PATH" "$LITELLM_KEY" "$LITELLM_BASE_URL" "$MODEL_ALIAS" <<'PY'
+python3 - "$CLAUDE_SETTINGS_PATH" "$VSCODE_SETTINGS_PATH" "$LITELLM_KEY" "$LITELLM_BASE_URL" "$MODEL_ALIAS" "$ENABLE_TOOL_SEARCH_VALUE" "$MAX_MCP_OUTPUT_TOKENS" <<'PY'
 from __future__ import annotations
 
 import json
@@ -65,6 +72,8 @@ vscode_path = pathlib.Path(sys.argv[2]).expanduser()
 api_key = sys.argv[3]
 base_url = sys.argv[4]
 model = sys.argv[5]
+enable_tool_search = sys.argv[6]
+max_mcp_output_tokens = sys.argv[7]
 
 
 def load_json(path: pathlib.Path) -> dict[str, Any]:
@@ -91,6 +100,8 @@ claude_env.update(
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_MODEL": model,
         "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+        "ENABLE_TOOL_SEARCH": enable_tool_search,
+        "MAX_MCP_OUTPUT_TOKENS": max_mcp_output_tokens,
         "API_TIMEOUT_MS": "600000",
     }
 )
@@ -112,6 +123,8 @@ PY
 log OK "Loaded host config: $CONFIG_FILE"
 log OK "Wrote Claude settings: $CLAUDE_SETTINGS_PATH"
 log OK "Wrote VS Code settings: $VSCODE_SETTINGS_PATH"
+log OK "ENABLE_TOOL_SEARCH=$ENABLE_TOOL_SEARCH_VALUE"
+log OK "MAX_MCP_OUTPUT_TOKENS=$MAX_MCP_OUTPUT_TOKENS"
 log INFO "Reload VS Code: Cmd+Shift+P → Developer: Reload Window"
 log INFO "Then open the Claude panel. It should use: $LITELLM_BASE_URL model=$MODEL_ALIAS"
 
